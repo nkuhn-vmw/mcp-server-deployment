@@ -40,13 +40,14 @@ Deploys [spring-fetch-mcp](https://github.com/nkuhn-vmw/spring-fetch-mcp) and [w
 
 ### 1. Configure Secrets
 
-Run the interactive setup script for **App Group 1**:
+Each workflow has its own interactive setup script:
 
 ```bash
-./setup-secrets.sh
+./setup-secrets.sh                      # App Group 1
+./setup-secrets-fetch-websearch.sh      # Fetch & Web Search MCP Servers
 ```
 
-For the **Fetch & Web Search** workflow, set the additional secrets manually via `gh secret set` or in **Settings > Secrets and variables > Actions** (see [Fetch & Web Search Secrets](#fetch--web-search-mcp-servers) below).
+Both scripts ask whether you're using **github.com** or **GitHub Enterprise Server**. The Fetch & Web Search script also lets you skip shared secrets (GitHub auth, CF credentials, approval reviewers) if you've already configured them via the other script.
 
 ### 2. Add CF Manifests
 
