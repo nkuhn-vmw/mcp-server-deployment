@@ -1,6 +1,7 @@
 #!/bin/bash
 #
-# Setup GitHub secrets for Multi-App GHE CF deployment workflow
+# Setup GitHub secrets for MCP App Group 1 CF deployment workflow
+# Works with both GitHub Enterprise Server and github.com
 # Requires: gh CLI authenticated with repo access
 #
 
@@ -119,22 +120,57 @@ show_value() {
     fi
 }
 
+# Prompt for GitHub platform choice
+choose_platform() {
+    echo "Where is the upstream release repository hosted?"
+    echo ""
+    echo -e "  ${BOLD}1)${NC} github.com"
+    echo -e "  ${BOLD}2)${NC} GitHub Enterprise Server"
+    echo ""
+
+    read -p "Enter choice [1-2]: " platform_choice
+
+    case $platform_choice in
+        1)
+            GITHUB_PLATFORM="github.com"
+            GHE_HOST=""
+            ;;
+        2)
+            GITHUB_PLATFORM="ghe"
+            ;;
+        *)
+            print_error "Invalid choice"
+            exit 1
+            ;;
+    esac
+}
+
 # Show what secrets are needed
 show_requirements() {
-    print_header "Multi-App GHE Deployment - Required Secrets"
+    print_header "MCP App Group 1 Deployment - Required Secrets"
 
-    echo "This workflow deploys TWO applications to Cloud Foundry via"
-    echo "GitHub Enterprise Server, with separate Nonprod and Prod foundations"
-    echo "and an email-based approval gate for production."
+    echo "This workflow deploys TWO applications to Cloud Foundry,"
+    echo "with separate Nonprod and Prod foundations and an"
+    echo "email-based approval gate for production."
+    echo ""
+    echo -e "${BOLD}Platform: ${CYAN}${GITHUB_PLATFORM}${NC}"
     echo ""
     echo -e "${BOLD}Before you begin, gather the following information:${NC}"
     echo ""
-    echo -e "${CYAN}GitHub Enterprise Server:${NC}"
-    print_bullet "GHE_HOST               - GHE hostname (e.g., github.mycompany.com)"
-    print_bullet "GHE_TOKEN              - Personal Access Token for GHE API access"
-    echo ""
+
+    if [ "$GITHUB_PLATFORM" = "ghe" ]; then
+        echo -e "${CYAN}GitHub Enterprise Server:${NC}"
+        print_bullet "GHE_HOST               - GHE hostname (e.g., github.mycompany.com)"
+        print_bullet "GHE_TOKEN              - Personal Access Token for GHE API access"
+        echo ""
+    else
+        echo -e "${CYAN}GitHub Authentication:${NC}"
+        print_bullet "GHE_TOKEN              - Personal Access Token (PAT) with repo scope"
+        echo ""
+    fi
+
     echo -e "${CYAN}Application Configuration:${NC}"
-    print_bullet "APP_UPSTREAM_REPO      - GHE repo to pull releases from"
+    print_bullet "APP_UPSTREAM_REPO      - Repo to pull releases from (owner/repo)"
     print_bullet "APP1_NAME              - Application 1 base name"
     print_bullet "APP1_MANIFEST_PATH     - Path to app1 manifest in this repo"
     print_bullet "APP1_ARTIFACT_PATTERN  - Release asset pattern for app1"
@@ -157,9 +193,14 @@ show_requirements() {
     print_bullet "CF_PROD_SPACE          - Prod space"
     echo ""
     echo -e "${CYAN}Approval Gate:${NC}"
-    print_bullet "APPROVAL_REVIEWERS     - Comma-separated GHE usernames for notifications"
+    print_bullet "APPROVAL_REVIEWERS     - Comma-separated usernames for notifications"
     echo ""
-    echo -e "${DIM}Total: 20 secrets to configure${NC}"
+
+    if [ "$GITHUB_PLATFORM" = "ghe" ]; then
+        echo -e "${DIM}Total: 20 secrets to configure${NC}"
+    else
+        echo -e "${DIM}Total: 19 secrets to configure (GHE_HOST not needed)${NC}"
+    fi
     echo ""
 
     read -p "Press Enter when ready to continue (or Ctrl+C to cancel)..."
@@ -169,17 +210,28 @@ show_requirements() {
 main() {
     clear 2>/dev/null || true
 
-    print_header "Multi-App GHE Deployment Secrets Setup"
+    print_header "MCP App Group 1 - Deployment Secrets Setup"
 
     check_gh_cli
+
+    echo ""
+    choose_platform
 
     show_requirements
 
     print_header "Enter Secret Values"
 
-    print_subheader "GitHub Enterprise Server"
-    prompt_secret "GHE_HOST" "github.mycompany.com"
-    prompt_password "GHE_TOKEN"
+    if [ "$GITHUB_PLATFORM" = "ghe" ]; then
+        print_subheader "GitHub Enterprise Server"
+        prompt_secret "GHE_HOST" "github.mycompany.com"
+        prompt_password "GHE_TOKEN"
+    else
+        print_subheader "GitHub Authentication"
+        echo -e "  ${DIM}A Personal Access Token with 'repo' scope is required${NC}"
+        echo -e "  ${DIM}to download release assets from the upstream repository.${NC}"
+        echo ""
+        prompt_password "GHE_TOKEN"
+    fi
 
     print_subheader "Application Configuration"
     prompt_secret "APP_UPSTREAM_REPO" "org/repo-name"
@@ -212,9 +264,14 @@ main() {
 
     echo "Please verify these values before setting the secrets:"
     echo ""
-    echo -e "${CYAN}GitHub Enterprise:${NC}"
-    show_value "GHE_HOST" "$GHE_HOST"
-    show_value "GHE_TOKEN" "$GHE_TOKEN"
+    if [ "$GITHUB_PLATFORM" = "ghe" ]; then
+        echo -e "${CYAN}GitHub Enterprise:${NC}"
+        show_value "GHE_HOST" "$GHE_HOST"
+        show_value "GHE_TOKEN" "$GHE_TOKEN"
+    else
+        echo -e "${CYAN}GitHub Authentication:${NC}"
+        show_value "GHE_TOKEN" "$GHE_TOKEN"
+    fi
     echo ""
     echo -e "${CYAN}Application Configuration:${NC}"
     show_value "APP_UPSTREAM_REPO" "$APP_UPSTREAM_REPO"
@@ -253,7 +310,9 @@ main() {
     print_header "Setting GitHub Secrets"
 
     local success_count=0
-    set_secret "GHE_HOST" "$GHE_HOST" && ((success_count++)) || true
+    if [ "$GITHUB_PLATFORM" = "ghe" ]; then
+        set_secret "GHE_HOST" "$GHE_HOST" && ((success_count++)) || true
+    fi
     set_secret "GHE_TOKEN" "$GHE_TOKEN" && ((success_count++)) || true
     set_secret "APP_UPSTREAM_REPO" "$APP_UPSTREAM_REPO" && ((success_count++)) || true
     set_secret "APP1_NAME" "$APP1_NAME" && ((success_count++)) || true
@@ -275,7 +334,7 @@ main() {
     set_secret "APPROVAL_REVIEWERS" "$APPROVAL_REVIEWERS" && ((success_count++)) || true
 
     echo ""
-    print_success "Multi-app GHE deployment configured! ($success_count secrets set)"
+    print_success "Deployment configured! ($success_count secrets set)"
 
     print_header "Setup Complete"
 
@@ -286,7 +345,7 @@ main() {
     echo ""
     echo "2. Enable 'Required reviewers' on the production environment"
     echo -e "   ${DIM}Add the users/teams who should approve production deployments${NC}"
-    echo -e "   ${DIM}GHE will email these reviewers when approval is needed${NC}"
+    echo -e "   ${DIM}GitHub will email these reviewers when approval is needed${NC}"
     echo ""
     echo "3. Verify your secrets in GitHub:"
     echo -e "   ${DIM}Settings > Secrets and variables > Actions${NC}"
@@ -295,8 +354,13 @@ main() {
     echo -e "   ${DIM}manifests/app1/manifest.yml${NC}"
     echo -e "   ${DIM}manifests/app2/manifest.yml${NC}"
     echo ""
-    echo "5. Ensure your GHE PAT has these scopes:"
-    echo -e "   ${DIM}repo, read:org, workflow${NC}"
+    if [ "$GITHUB_PLATFORM" = "ghe" ]; then
+        echo "5. Ensure your GHE PAT has these scopes:"
+        echo -e "   ${DIM}repo, read:org, workflow${NC}"
+    else
+        echo "5. Ensure your GitHub PAT has these scopes:"
+        echo -e "   ${DIM}repo, read:org, workflow${NC}"
+    fi
     echo ""
 }
 

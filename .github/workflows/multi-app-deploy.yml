@@ -1,4 +1,4 @@
-name: Multi-App Deploy to Cloud Foundry (GHE)
+name: Deploy MCP App Group 1 to Cloud Foundry
 
 # On-demand only — manually triggered from the Actions tab
 on:
@@ -47,20 +47,27 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure GHE Authentication
+      - name: Configure GitHub Authentication
         env:
           GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
           GHE_HOST: ${{ secrets.GHE_HOST }}
         run: |
-          if [ -z "$GHE_HOST" ] || [ -z "$GHE_TOKEN" ]; then
-            echo "Error: GHE_HOST and GHE_TOKEN secrets must be configured"
+          if [ -z "$GHE_TOKEN" ]; then
+            echo "Error: GHE_TOKEN secret must be configured"
             exit 1
           fi
 
-          # Authenticate gh CLI to GitHub Enterprise Server
-          echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
-          gh auth status --hostname "${GHE_HOST}"
-          echo "Authenticated to GitHub Enterprise: ${GHE_HOST}"
+          if [ -n "$GHE_HOST" ]; then
+            # Authenticate gh CLI to GitHub Enterprise Server
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+            gh auth status --hostname "${GHE_HOST}"
+            echo "Authenticated to GitHub Enterprise: ${GHE_HOST}"
+          else
+            # Authenticate gh CLI to github.com
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+            gh auth status
+            echo "Authenticated to github.com"
+          fi
 
       - name: Validate release
         id: validate
@@ -76,8 +83,8 @@ jobs:
 
           RELEASE_TAG="${{ inputs.release_tag }}"
 
-          # Validate the release exists on GHE
-          echo "Validating release ${RELEASE_TAG} exists in ${UPSTREAM_REPO} on ${GH_HOST}..."
+          # Validate the release exists in the upstream repo
+          echo "Validating release ${RELEASE_TAG} exists in ${UPSTREAM_REPO}..."
           RELEASE_INFO=$(gh api "repos/${UPSTREAM_REPO}/releases/tags/${RELEASE_TAG}" --jq '.tag_name' 2>&1) || {
             echo "Error: Release ${RELEASE_TAG} not found in ${UPSTREAM_REPO}"
             echo "API response: ${RELEASE_INFO}"
@@ -272,9 +279,9 @@ jobs:
           echo "App 2 deployed to nonprod: ${DEPLOY_NAME}"
 
   # ──────────────────────────────────────────────────────────────
-  # Job 3: Send approval notification via GHE
+  # Job 3: Send approval notification
   #
-  # GHE automatically emails environment reviewers when the
+  # GitHub automatically emails environment reviewers when the
   # deploy-prod job reaches the 'production' environment gate.
   # This job creates an additional deployment notification for
   # broader visibility (repo watchers, team channels, etc).
@@ -286,12 +293,16 @@ jobs:
       (needs.deploy-nonprod.result == 'success' || needs.deploy-nonprod.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
-      - name: Configure GHE Authentication
+      - name: Configure GitHub Authentication
         env:
           GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
           GHE_HOST: ${{ secrets.GHE_HOST }}
         run: |
-          echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
 
       - name: Send deployment approval notification
         env:
@@ -336,8 +347,8 @@ jobs:
           echo "Reviewers:  ${APPROVAL_REVIEWERS}"
           echo "=========================================="
 
-          # Create a deployment event via GHE API to trigger email notifications
-          # GHE sends emails to repo watchers and mentioned users
+          # Create a deployment event via GitHub API to trigger email notifications
+          # GitHub sends emails to repo watchers and mentioned users
           gh api "repos/${{ github.repository }}/deployments" \
             -f ref="${{ github.sha }}" \
             -f environment="production" \
@@ -350,14 +361,14 @@ jobs:
   # Job 4: Deploy both apps to Production
   #
   # Gated by the 'production' environment which requires manual
-  # approval. GHE sends email to configured reviewers asking
+  # approval. GitHub sends email to configured reviewers asking
   # them to approve or reject the deployment.
   #
   # To configure the approval gate:
   #   1. Go to Settings > Environments > New environment > "production"
   #   2. Enable "Required reviewers"
   #   3. Add the users/teams who should approve prod deployments
-  #   4. GHE will email those reviewers when this job is reached
+  #   4. GitHub will email those reviewers when this job is reached
   # ──────────────────────────────────────────────────────────────
   deploy-prod:
     needs: [validate-and-prepare, deploy-nonprod]
@@ -437,13 +448,16 @@ jobs:
 
           echo "App 2 deployed to prod: ${DEPLOY_NAME}"
 
-      - name: Configure GHE Authentication for git push
+      - name: Configure Authentication for git push
         env:
           GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
           GHE_HOST: ${{ secrets.GHE_HOST }}
         run: |
-          # Configure git to use GHE token for push
-          git remote set-url origin "https://x-access-token:${GHE_TOKEN}@${GHE_HOST}/${{ github.repository }}.git"
+          if [ -n "$GHE_HOST" ]; then
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@${GHE_HOST}/${{ github.repository }}.git"
+          else
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@github.com/${{ github.repository }}.git"
+          fi
 
       - name: Record deployed version
         run: |
