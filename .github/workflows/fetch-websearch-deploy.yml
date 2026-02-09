@@ -1,0 +1,520 @@
+name: Deploy Fetch and Web Search MCP Servers
+
+# On-demand only — manually triggered from the Actions tab
+on:
+  workflow_dispatch:
+    inputs:
+      fetch_release_tag:
+        description: 'Fetch MCP release tag (e.g., v1.2.0)'
+        required: false
+        type: string
+      websearch_release_tag:
+        description: 'Web Search MCP release tag (e.g., v1.0.0)'
+        required: false
+        type: string
+      deploy_fetch:
+        description: 'Deploy Fetch MCP Server'
+        required: false
+        type: boolean
+        default: true
+      deploy_websearch:
+        description: 'Deploy Web Search MCP Server'
+        required: false
+        type: boolean
+        default: true
+      skip_nonprod:
+        description: 'Skip non-prod deployment (deploy directly to prod)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: read
+  deployments: write
+
+env:
+  CF_CLI_VERSION: "v8"
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Job 1: Validate releases and prepare artifacts
+  # ──────────────────────────────────────────────────────────────
+  validate-and-prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      fetch_release_tag: ${{ steps.validate.outputs.fetch_release_tag }}
+      fetch_version: ${{ steps.validate.outputs.fetch_version }}
+      fetch_version_dotted: ${{ steps.validate.outputs.fetch_version_dotted }}
+      websearch_release_tag: ${{ steps.validate.outputs.websearch_release_tag }}
+      websearch_version: ${{ steps.validate.outputs.websearch_version }}
+      websearch_version_dotted: ${{ steps.validate.outputs.websearch_version_dotted }}
+      deploy_fetch: ${{ steps.validate.outputs.deploy_fetch }}
+      deploy_websearch: ${{ steps.validate.outputs.deploy_websearch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -z "$GHE_TOKEN" ]; then
+            echo "Error: GHE_TOKEN secret must be configured"
+            exit 1
+          fi
+
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+            gh auth status --hostname "${GHE_HOST}"
+            echo "Authenticated to GitHub Enterprise: ${GHE_HOST}"
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+            gh auth status
+            echo "Authenticated to github.com"
+          fi
+
+      - name: Validate inputs
+        run: |
+          DEPLOY_FETCH="${{ inputs.deploy_fetch }}"
+          DEPLOY_WEBSEARCH="${{ inputs.deploy_websearch }}"
+          FETCH_TAG="${{ inputs.fetch_release_tag }}"
+          WEBSEARCH_TAG="${{ inputs.websearch_release_tag }}"
+
+          if [ "$DEPLOY_FETCH" = "true" ] && [ -z "$FETCH_TAG" ]; then
+            echo "Error: fetch_release_tag is required when deploy_fetch is enabled"
+            exit 1
+          fi
+
+          if [ "$DEPLOY_WEBSEARCH" = "true" ] && [ -z "$WEBSEARCH_TAG" ]; then
+            echo "Error: websearch_release_tag is required when deploy_websearch is enabled"
+            exit 1
+          fi
+
+      - name: Validate releases
+        id: validate
+        env:
+          GH_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          FETCH_UPSTREAM_REPO: ${{ secrets.FETCH_MCP_UPSTREAM_REPO }}
+          WEBSEARCH_UPSTREAM_REPO: ${{ secrets.WEBSEARCH_MCP_UPSTREAM_REPO }}
+        run: |
+          DEPLOY_FETCH="${{ inputs.deploy_fetch }}"
+          DEPLOY_WEBSEARCH="${{ inputs.deploy_websearch }}"
+
+          # Validate Fetch MCP release
+          if [ "$DEPLOY_FETCH" = "true" ]; then
+            FETCH_TAG="${{ inputs.fetch_release_tag }}"
+            echo "Validating Fetch MCP release ${FETCH_TAG} in ${FETCH_UPSTREAM_REPO}..."
+            RELEASE_INFO=$(gh api "repos/${FETCH_UPSTREAM_REPO}/releases/tags/${FETCH_TAG}" --jq '.tag_name' 2>&1) || {
+              echo "Error: Release ${FETCH_TAG} not found in ${FETCH_UPSTREAM_REPO}"
+              echo "API response: ${RELEASE_INFO}"
+              exit 1
+            }
+            echo "Fetch MCP release validated: ${RELEASE_INFO}"
+
+            FETCH_VERSION=${FETCH_TAG#v}
+            FETCH_APP_VERSION=${FETCH_VERSION//./-}
+            echo "fetch_release_tag=${FETCH_TAG}" >> "$GITHUB_OUTPUT"
+            echo "fetch_version=${FETCH_APP_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "fetch_version_dotted=${FETCH_VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Validate Web Search MCP release
+          if [ "$DEPLOY_WEBSEARCH" = "true" ]; then
+            WEBSEARCH_TAG="${{ inputs.websearch_release_tag }}"
+            echo "Validating Web Search MCP release ${WEBSEARCH_TAG} in ${WEBSEARCH_UPSTREAM_REPO}..."
+            RELEASE_INFO=$(gh api "repos/${WEBSEARCH_UPSTREAM_REPO}/releases/tags/${WEBSEARCH_TAG}" --jq '.tag_name' 2>&1) || {
+              echo "Error: Release ${WEBSEARCH_TAG} not found in ${WEBSEARCH_UPSTREAM_REPO}"
+              echo "API response: ${RELEASE_INFO}"
+              exit 1
+            }
+            echo "Web Search MCP release validated: ${RELEASE_INFO}"
+
+            WEBSEARCH_VERSION=${WEBSEARCH_TAG#v}
+            WEBSEARCH_APP_VERSION=${WEBSEARCH_VERSION//./-}
+            echo "websearch_release_tag=${WEBSEARCH_TAG}" >> "$GITHUB_OUTPUT"
+            echo "websearch_version=${WEBSEARCH_APP_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "websearch_version_dotted=${WEBSEARCH_VERSION}" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "deploy_fetch=${DEPLOY_FETCH}" >> "$GITHUB_OUTPUT"
+          echo "deploy_websearch=${DEPLOY_WEBSEARCH}" >> "$GITHUB_OUTPUT"
+
+      - name: Download Fetch MCP release assets
+        if: inputs.deploy_fetch
+        env:
+          GH_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.FETCH_MCP_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
+        run: |
+          VERSION_DOTTED="${{ steps.validate.outputs.fetch_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading Fetch MCP artifact matching: ${PATTERN}"
+
+          mkdir -p ./artifacts/fetch
+          gh release download "${{ inputs.fetch_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./artifacts/fetch
+
+          echo "Fetch MCP artifacts downloaded:"
+          ls -la ./artifacts/fetch/
+
+      - name: Download Web Search MCP release assets
+        if: inputs.deploy_websearch
+        env:
+          GH_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.WEBSEARCH_MCP_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
+        run: |
+          VERSION_DOTTED="${{ steps.validate.outputs.websearch_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading Web Search MCP artifact matching: ${PATTERN}"
+
+          mkdir -p ./artifacts/websearch
+          gh release download "${{ inputs.websearch_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./artifacts/websearch
+
+          echo "Web Search MCP artifacts downloaded:"
+          ls -la ./artifacts/websearch/
+
+      - name: Copy manifest files from repo
+        env:
+          FETCH_MANIFEST: ${{ secrets.FETCH_MCP_MANIFEST_PATH }}
+          WEBSEARCH_MANIFEST: ${{ secrets.WEBSEARCH_MCP_MANIFEST_PATH }}
+        run: |
+          if [ "${{ inputs.deploy_fetch }}" = "true" ]; then
+            MANIFEST_PATH="${FETCH_MANIFEST:-manifests/fetch-mcp/manifest.yml}"
+            if [ ! -f "$MANIFEST_PATH" ]; then
+              echo "Error: Fetch MCP manifest not found at ${MANIFEST_PATH}"
+              exit 1
+            fi
+            cp "$MANIFEST_PATH" ./artifacts/fetch/manifest.yml
+            echo "Fetch MCP manifest copied from: ${MANIFEST_PATH}"
+          fi
+
+          if [ "${{ inputs.deploy_websearch }}" = "true" ]; then
+            MANIFEST_PATH="${WEBSEARCH_MANIFEST:-manifests/websearch-mcp/manifest.yml}"
+            if [ ! -f "$MANIFEST_PATH" ]; then
+              echo "Error: Web Search MCP manifest not found at ${MANIFEST_PATH}"
+              exit 1
+            fi
+            cp "$MANIFEST_PATH" ./artifacts/websearch/manifest.yml
+            echo "Web Search MCP manifest copied from: ${MANIFEST_PATH}"
+          fi
+
+      - name: Upload Fetch MCP artifacts
+        if: inputs.deploy_fetch
+        uses: actions/upload-artifact@v4
+        with:
+          name: fetch-mcp-release-assets
+          path: ./artifacts/fetch/
+          retention-days: 1
+
+      - name: Upload Web Search MCP artifacts
+        if: inputs.deploy_websearch
+        uses: actions/upload-artifact@v4
+        with:
+          name: websearch-mcp-release-assets
+          path: ./artifacts/websearch/
+          retention-days: 1
+
+  # ──────────────────────────────────────────────────────────────
+  # Job 2: Deploy both servers to Non-Production
+  # ──────────────────────────────────────────────────────────────
+  deploy-nonprod:
+    needs: validate-and-prepare
+    if: inputs.skip_nonprod != true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install CF CLI
+        run: |
+          curl -sL "https://packages.cloudfoundry.org/stable?release=linux64-binary&version=${{ env.CF_CLI_VERSION }}&source=github" | tar -zx
+          chmod +x cf8
+
+      - name: Authenticate to Nonprod CF
+        env:
+          CF_API: ${{ secrets.CF_NONPROD_API }}
+          CF_USER: ${{ secrets.CF_NONPROD_USERNAME }}
+          CF_PASS: ${{ secrets.CF_NONPROD_PASSWORD }}
+          CF_ORG: ${{ secrets.CF_NONPROD_ORG }}
+          CF_SPACE: ${{ secrets.CF_NONPROD_SPACE }}
+        run: |
+          ./cf8 api "$CF_API"
+          ./cf8 auth "$CF_USER" "$CF_PASS"
+          ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
+          echo "Authenticated to Nonprod CF: ${CF_API}"
+
+      - name: Download Fetch MCP artifacts
+        if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: fetch-mcp-release-assets
+          path: ./fetch
+
+      - name: Deploy Fetch MCP to Nonprod
+        if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
+        env:
+          APP_NAME: ${{ secrets.FETCH_MCP_NAME }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.fetch_version }}
+          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.fetch_version_dotted }}
+          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
+        run: |
+          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          DEPLOY_NAME="${APP_NAME}-nonprod-${VERSION}"
+
+          echo "Deploying ${DEPLOY_NAME}..."
+          ./cf8 push "${DEPLOY_NAME}" \
+            -f ./fetch/manifest.yml \
+            -p "./fetch/${ARTIFACT}"
+
+          echo "Fetch MCP deployed to nonprod: ${DEPLOY_NAME}"
+
+      - name: Download Web Search MCP artifacts
+        if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: websearch-mcp-release-assets
+          path: ./websearch
+
+      - name: Deploy Web Search MCP to Nonprod
+        if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
+        env:
+          APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
+          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.websearch_version_dotted }}
+          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
+        run: |
+          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          DEPLOY_NAME="${APP_NAME}-nonprod-${VERSION}"
+
+          echo "Deploying ${DEPLOY_NAME}..."
+          ./cf8 push "${DEPLOY_NAME}" \
+            -f ./websearch/manifest.yml \
+            -p "./websearch/${ARTIFACT}"
+
+          echo "Web Search MCP deployed to nonprod: ${DEPLOY_NAME}"
+
+  # ──────────────────────────────────────────────────────────────
+  # Job 3: Send approval notification
+  #
+  # GitHub automatically emails environment reviewers when the
+  # deploy-prod job reaches the 'production' environment gate.
+  # This job creates an additional deployment notification for
+  # broader visibility (repo watchers, team channels, etc).
+  # ──────────────────────────────────────────────────────────────
+  notify-approval-required:
+    needs: [validate-and-prepare, deploy-nonprod]
+    if: |
+      always() &&
+      (needs.deploy-nonprod.result == 'success' || needs.deploy-nonprod.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
+
+      - name: Send deployment approval notification
+        env:
+          GH_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          APPROVAL_REVIEWERS: ${{ secrets.APPROVAL_REVIEWERS }}
+          FETCH_NAME: ${{ secrets.FETCH_MCP_NAME }}
+          WEBSEARCH_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          DEPLOY_FETCH="${{ needs.validate-and-prepare.outputs.deploy_fetch }}"
+          DEPLOY_WEBSEARCH="${{ needs.validate-and-prepare.outputs.deploy_websearch }}"
+
+          # Build description of what's being deployed
+          APPS_LIST=""
+          if [ "$DEPLOY_FETCH" = "true" ]; then
+            FETCH_TAG="${{ needs.validate-and-prepare.outputs.fetch_release_tag }}"
+            APPS_LIST="${FETCH_NAME} (${FETCH_TAG})"
+          fi
+          if [ "$DEPLOY_WEBSEARCH" = "true" ]; then
+            WEBSEARCH_TAG="${{ needs.validate-and-prepare.outputs.websearch_release_tag }}"
+            if [ -n "$APPS_LIST" ]; then APPS_LIST="${APPS_LIST}, "; fi
+            APPS_LIST="${APPS_LIST}${WEBSEARCH_NAME} (${WEBSEARCH_TAG})"
+          fi
+
+          # Build reviewer mentions for notification
+          REVIEWERS_MENTION=""
+          if [ -n "$APPROVAL_REVIEWERS" ]; then
+            IFS=',' read -ra REVIEWERS <<< "$APPROVAL_REVIEWERS"
+            for reviewer in "${REVIEWERS[@]}"; do
+              reviewer=$(echo "$reviewer" | xargs)
+              REVIEWERS_MENTION="${REVIEWERS_MENTION}@${reviewer} "
+            done
+          fi
+
+          DESCRIPTION="Production deployment approval required. Apps: ${APPS_LIST}. Review: ${RUN_URL} ${REVIEWERS_MENTION}"
+
+          echo "=========================================="
+          echo "PRODUCTION DEPLOYMENT APPROVAL REQUIRED"
+          echo "=========================================="
+          echo "Apps:       ${APPS_LIST}"
+          echo "Approve at: ${RUN_URL}"
+          echo "Reviewers:  ${APPROVAL_REVIEWERS}"
+          echo "=========================================="
+
+          # Create a deployment event via GitHub API to trigger email notifications
+          gh api "repos/${{ github.repository }}/deployments" \
+            -f ref="${{ github.sha }}" \
+            -f environment="production" \
+            -f description="${DESCRIPTION}" \
+            -f auto_merge=false \
+            -f required_contexts="[]" \
+            --silent 2>/dev/null || echo "::warning::Could not create deployment notification (non-blocking)"
+
+  # ──────────────────────────────────────────────────────────────
+  # Job 4: Deploy both servers to Production
+  #
+  # Gated by the 'production' environment which requires manual
+  # approval. GitHub sends email to configured reviewers asking
+  # them to approve or reject the deployment.
+  #
+  # To configure the approval gate:
+  #   1. Go to Settings > Environments > New environment > "production"
+  #   2. Enable "Required reviewers"
+  #   3. Add the users/teams who should approve prod deployments
+  #   4. GitHub will email those reviewers when this job is reached
+  # ──────────────────────────────────────────────────────────────
+  deploy-prod:
+    needs: [validate-and-prepare, deploy-nonprod]
+    if: |
+      always() &&
+      (needs.deploy-nonprod.result == 'success' || needs.deploy-nonprod.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CF CLI
+        run: |
+          curl -sL "https://packages.cloudfoundry.org/stable?release=linux64-binary&version=${{ env.CF_CLI_VERSION }}&source=github" | tar -zx
+          chmod +x cf8
+
+      - name: Authenticate to Prod CF
+        env:
+          CF_API: ${{ secrets.CF_PROD_API }}
+          CF_USER: ${{ secrets.CF_PROD_USERNAME }}
+          CF_PASS: ${{ secrets.CF_PROD_PASSWORD }}
+          CF_ORG: ${{ secrets.CF_PROD_ORG }}
+          CF_SPACE: ${{ secrets.CF_PROD_SPACE }}
+        run: |
+          ./cf8 api "$CF_API"
+          ./cf8 auth "$CF_USER" "$CF_PASS"
+          ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
+          echo "Authenticated to Prod CF: ${CF_API}"
+
+      - name: Download Fetch MCP artifacts
+        if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: fetch-mcp-release-assets
+          path: ./fetch
+
+      - name: Deploy Fetch MCP to Prod
+        if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
+        env:
+          APP_NAME: ${{ secrets.FETCH_MCP_NAME }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.fetch_version }}
+          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.fetch_version_dotted }}
+          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
+        run: |
+          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          DEPLOY_NAME="${APP_NAME}-prod-${VERSION}"
+
+          echo "Deploying ${DEPLOY_NAME}..."
+          ./cf8 push "${DEPLOY_NAME}" \
+            -f ./fetch/manifest.yml \
+            -p "./fetch/${ARTIFACT}"
+
+          echo "Fetch MCP deployed to prod: ${DEPLOY_NAME}"
+
+      - name: Download Web Search MCP artifacts
+        if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: websearch-mcp-release-assets
+          path: ./websearch
+
+      - name: Deploy Web Search MCP to Prod
+        if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
+        env:
+          APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
+          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.websearch_version_dotted }}
+          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
+        run: |
+          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          DEPLOY_NAME="${APP_NAME}-prod-${VERSION}"
+
+          echo "Deploying ${DEPLOY_NAME}..."
+          ./cf8 push "${DEPLOY_NAME}" \
+            -f ./websearch/manifest.yml \
+            -p "./websearch/${ARTIFACT}"
+
+          echo "Web Search MCP deployed to prod: ${DEPLOY_NAME}"
+
+      - name: Configure Authentication for git push
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@${GHE_HOST}/${{ github.repository }}.git"
+          else
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@github.com/${{ github.repository }}.git"
+          fi
+
+      - name: Record deployed versions
+        run: |
+          DEPLOY_FETCH="${{ needs.validate-and-prepare.outputs.deploy_fetch }}"
+          DEPLOY_WEBSEARCH="${{ needs.validate-and-prepare.outputs.deploy_websearch }}"
+
+          CHANGED=false
+
+          if [ "$DEPLOY_FETCH" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.fetch_release_tag }}" > .last-deployed-fetch-mcp
+            git add .last-deployed-fetch-mcp
+            CHANGED=true
+          fi
+
+          if [ "$DEPLOY_WEBSEARCH" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.websearch_release_tag }}" > .last-deployed-websearch-mcp
+            git add .last-deployed-websearch-mcp
+            CHANGED=true
+          fi
+
+          if [ "$CHANGED" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            MSG="Record deployment:"
+            if [ "$DEPLOY_FETCH" = "true" ]; then
+              MSG="${MSG} fetch-mcp=${{ needs.validate-and-prepare.outputs.fetch_release_tag }}"
+            fi
+            if [ "$DEPLOY_WEBSEARCH" = "true" ]; then
+              MSG="${MSG} websearch-mcp=${{ needs.validate-and-prepare.outputs.websearch_release_tag }}"
+            fi
+
+            git diff --cached --quiet || git commit -m "${MSG}"
+            git push
+          fi
