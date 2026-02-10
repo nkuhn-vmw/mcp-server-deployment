@@ -272,7 +272,7 @@ jobs:
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
-            -f ./artifacts/fetch/manifest.yml \
+            -f ./manifests/fetch-mcp/manifest.yml \
             -p "./artifacts/fetch/${ARTIFACT}"
 
           echo "Fetch MCP deployed to nonprod: ${DEPLOY_NAME}"
