@@ -288,29 +288,25 @@ jobs:
         env:
           APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
+          WEBSEARCH_API_KEY: ${{ secrets.WEBSEARCH_API_KEY }}
         run: |
           DEPLOY_NAME="${APP_NAME}-nonprod-${VERSION}"
           ARTIFACT=$(ls ./websearch/ | grep -v manifest.yml | head -1)
           echo "Artifact found: ${ARTIFACT}"
 
-          echo "Deploying ${DEPLOY_NAME}..."
+          echo "Pushing ${DEPLOY_NAME} (--no-start)..."
           ./cf8 push "${DEPLOY_NAME}" \
             -f ./websearch/manifest.yml \
-            -p "./websearch/${ARTIFACT}"
+            -p "./websearch/${ARTIFACT}" \
+            --no-start
+
+          echo "Setting env vars..."
+          ./cf8 set-env "${DEPLOY_NAME}" WEBSEARCH_API_KEY "${WEBSEARCH_API_KEY}"
+
+          echo "Starting ${DEPLOY_NAME}..."
+          ./cf8 start "${DEPLOY_NAME}"
 
           echo "Web Search MCP deployed to nonprod: ${DEPLOY_NAME}"
-
-      - name: Set Web Search MCP env vars in Nonprod
-        if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
-        env:
-          APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
-          VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
-          WEBSEARCH_API_KEY: ${{ secrets.WEBSEARCH_API_KEY }}
-        run: |
-          DEPLOY_NAME="${APP_NAME}-nonprod-${VERSION}"
-          ./cf8 set-env "${DEPLOY_NAME}" WEBSEARCH_API_KEY "${WEBSEARCH_API_KEY}"
-          ./cf8 restage "${DEPLOY_NAME}"
-          echo "Web Search MCP env vars set and restaged: ${DEPLOY_NAME}"
 
   # ──────────────────────────────────────────────────────────────
   # Job 3: Send approval notification
@@ -469,29 +465,25 @@ jobs:
         env:
           APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
+          WEBSEARCH_API_KEY: ${{ secrets.WEBSEARCH_API_KEY }}
         run: |
           DEPLOY_NAME="${APP_NAME}-prod-${VERSION}"
           ARTIFACT=$(ls ./websearch/ | grep -v manifest.yml | head -1)
           echo "Artifact found: ${ARTIFACT}"
 
-          echo "Deploying ${DEPLOY_NAME}..."
+          echo "Pushing ${DEPLOY_NAME} (--no-start)..."
           ./cf8 push "${DEPLOY_NAME}" \
             -f ./websearch/manifest.yml \
-            -p "./websearch/${ARTIFACT}"
+            -p "./websearch/${ARTIFACT}" \
+            --no-start
+
+          echo "Setting env vars..."
+          ./cf8 set-env "${DEPLOY_NAME}" WEBSEARCH_API_KEY "${WEBSEARCH_API_KEY}"
+
+          echo "Starting ${DEPLOY_NAME}..."
+          ./cf8 start "${DEPLOY_NAME}"
 
           echo "Web Search MCP deployed to prod: ${DEPLOY_NAME}"
-
-      - name: Set Web Search MCP env vars in Prod
-        if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
-        env:
-          APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
-          VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
-          WEBSEARCH_API_KEY: ${{ secrets.WEBSEARCH_API_KEY }}
-        run: |
-          DEPLOY_NAME="${APP_NAME}-prod-${VERSION}"
-          ./cf8 set-env "${DEPLOY_NAME}" WEBSEARCH_API_KEY "${WEBSEARCH_API_KEY}"
-          ./cf8 restage "${DEPLOY_NAME}"
-          echo "Web Search MCP env vars set and restaged: ${DEPLOY_NAME}"
 
       - name: Configure Authentication for git push
         env:
