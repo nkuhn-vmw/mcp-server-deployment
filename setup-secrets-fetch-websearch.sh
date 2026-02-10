@@ -111,7 +111,7 @@ show_value() {
     local name="$1"
     local value="$2"
 
-    if [[ "$name" == *"PASSWORD"* ]] || [[ "$name" == *"TOKEN"* ]]; then
+    if [[ "$name" == *"PASSWORD"* ]] || [[ "$name" == *"TOKEN"* ]] || [[ "$name" == *"API_KEY"* ]]; then
         echo -e "  ${BOLD}$name${NC}: ${DIM}(hidden)${NC}"
     elif [ -z "$value" ]; then
         echo -e "  ${BOLD}$name${NC}: ${YELLOW}(empty - will be skipped)${NC}"
@@ -208,6 +208,7 @@ show_requirements() {
     print_bullet "WEBSEARCH_MCP_NAME              - CF app base name"
     print_bullet "WEBSEARCH_MCP_MANIFEST_PATH     - Path to manifest in this repo"
     print_bullet "WEBSEARCH_MCP_ARTIFACT_PATTERN  - Release asset pattern"
+    print_bullet "WEBSEARCH_API_KEY               - API key for web search provider (e.g., Brave)"
     echo ""
 
     if [ "$CONFIGURE_SHARED" = "true" ]; then
@@ -230,7 +231,7 @@ show_requirements() {
         echo ""
     fi
 
-    local total=8
+    local total=9
     if [ "$CONFIGURE_SHARED" = "true" ]; then
         total=$((total + 12))
         if [ "$GITHUB_PLATFORM" = "ghe" ]; then
@@ -287,6 +288,7 @@ main() {
     prompt_secret "WEBSEARCH_MCP_NAME" "web-search-mcp"
     prompt_secret "WEBSEARCH_MCP_MANIFEST_PATH" "manifests/websearch-mcp/manifest.yml"
     prompt_secret "WEBSEARCH_MCP_ARTIFACT_PATTERN" "web-search-mcp-*.jar"
+    prompt_password "WEBSEARCH_API_KEY"
 
     # Shared CF + approval secrets (if selected)
     if [ "$CONFIGURE_SHARED" = "true" ]; then
@@ -337,6 +339,7 @@ main() {
     show_value "WEBSEARCH_MCP_NAME" "$WEBSEARCH_MCP_NAME"
     show_value "WEBSEARCH_MCP_MANIFEST_PATH" "$WEBSEARCH_MCP_MANIFEST_PATH"
     show_value "WEBSEARCH_MCP_ARTIFACT_PATTERN" "$WEBSEARCH_MCP_ARTIFACT_PATTERN"
+    show_value "WEBSEARCH_API_KEY" "$WEBSEARCH_API_KEY"
 
     if [ "$CONFIGURE_SHARED" = "true" ]; then
         echo ""
@@ -389,6 +392,7 @@ main() {
     set_secret "WEBSEARCH_MCP_NAME" "$WEBSEARCH_MCP_NAME" && ((success_count++)) || true
     set_secret "WEBSEARCH_MCP_MANIFEST_PATH" "$WEBSEARCH_MCP_MANIFEST_PATH" && ((success_count++)) || true
     set_secret "WEBSEARCH_MCP_ARTIFACT_PATTERN" "$WEBSEARCH_MCP_ARTIFACT_PATTERN" && ((success_count++)) || true
+    set_secret "WEBSEARCH_API_KEY" "$WEBSEARCH_API_KEY" && ((success_count++)) || true
 
     # Shared CF + approval secrets
     if [ "$CONFIGURE_SHARED" = "true" ]; then
