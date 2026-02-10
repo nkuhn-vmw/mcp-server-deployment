@@ -264,11 +264,10 @@ jobs:
         env:
           APP_NAME: ${{ secrets.FETCH_MCP_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.fetch_version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.fetch_version_dotted }}
-          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
         run: |
-          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP_NAME}-nonprod-${VERSION}"
+          ARTIFACT=$(ls ./fetch/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
@@ -289,11 +288,10 @@ jobs:
         env:
           APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.websearch_version_dotted }}
-          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
         run: |
-          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP_NAME}-nonprod-${VERSION}"
+          ARTIFACT=$(ls ./websearch/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
@@ -435,11 +433,10 @@ jobs:
         env:
           APP_NAME: ${{ secrets.FETCH_MCP_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.fetch_version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.fetch_version_dotted }}
-          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
         run: |
-          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP_NAME}-prod-${VERSION}"
+          ARTIFACT=$(ls ./fetch/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
@@ -460,11 +457,10 @@ jobs:
         env:
           APP_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.websearch_version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.websearch_version_dotted }}
-          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
         run: |
-          ARTIFACT=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP_NAME}-prod-${VERSION}"
+          ARTIFACT=$(ls ./websearch/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
