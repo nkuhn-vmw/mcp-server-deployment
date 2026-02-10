@@ -22,11 +22,6 @@ on:
         required: false
         type: boolean
         default: true
-      skip_nonprod:
-        description: 'Skip non-prod deployment (deploy directly to prod)'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -231,7 +226,6 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   deploy-nonprod:
     needs: validate-and-prepare
-    if: inputs.skip_nonprod != true
     runs-on: ubuntu-latest
     steps:
       - name: Install CF CLI
@@ -318,9 +312,6 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   notify-approval-required:
     needs: [validate-and-prepare, deploy-nonprod]
-    if: |
-      always() &&
-      (needs.deploy-nonprod.result == 'success' || needs.deploy-nonprod.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Configure GitHub Authentication
@@ -403,9 +394,6 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   deploy-prod:
     needs: [validate-and-prepare, deploy-nonprod]
-    if: |
-      always() &&
-      (needs.deploy-nonprod.result == 'success' || needs.deploy-nonprod.result == 'skipped')
     runs-on: ubuntu-latest
     environment: production
     steps:
