@@ -15,4 +15,4 @@ applications:
     health-check-http-endpoint: /actuator/health/liveness
     services:
       # Bind your SSO service (p-identity, uaa, etc.)
-      - cf-llama-chat-sso
+      - mcp-server-sso
