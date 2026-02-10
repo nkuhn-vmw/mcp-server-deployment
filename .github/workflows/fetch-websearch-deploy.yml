@@ -372,12 +372,15 @@ jobs:
 
           # Create a deployment event via GitHub API to trigger email notifications
           gh api "repos/${{ github.repository }}/deployments" \
-            -f ref="${{ github.sha }}" \
-            -f environment="production" \
-            -f description="${DESCRIPTION}" \
-            -f auto_merge=false \
-            -f required_contexts="[]" \
-            --silent 2>/dev/null || echo "::warning::Could not create deployment notification (non-blocking)"
+            --input - <<EOF || echo "::warning::Could not create deployment notification (non-blocking)"
+          {
+            "ref": "${{ github.sha }}",
+            "environment": "production-pending",
+            "description": "${DESCRIPTION}",
+            "auto_merge": false,
+            "required_contexts": []
+          }
+          EOF
 
   # ──────────────────────────────────────────────────────────────
   # Job 4: Deploy both servers to Production
