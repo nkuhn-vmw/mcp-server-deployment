@@ -1,0 +1,18 @@
+# Cloud Foundry Deployment Manifest
+applications:
+  - name: web-search-mcp
+    memory: 1G
+    instances: 1
+    path: target/web-search-mcp-1.0.0-SNAPSHOT.jar
+    buildpacks:
+      - java_buildpack_offline
+    env:
+      JBP_CONFIG_OPEN_JDK_JRE: '{ jre: { version: 21.+ } }'
+      SPRING_PROFILES_ACTIVE: cloud
+      WEBSEARCH_PROVIDER: BRAVE
+      # WEBSEARCH_API_KEY: Set via 'cf set-env' for security
+    health-check-type: http
+    health-check-http-endpoint: /actuator/health/liveness
+    services:
+      # Bind your SSO service (p-identity, uaa, etc.)
+      - cf-llama-chat-sso
