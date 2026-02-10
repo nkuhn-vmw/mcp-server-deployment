@@ -272,7 +272,7 @@ jobs:
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
-            -f ./fetch/manifest.yml \
+            -f ./fetch-mcp/manifest.yml \
             -p "./fetch/${ARTIFACT}"
 
           echo "Fetch MCP deployed to nonprod: ${DEPLOY_NAME}"
@@ -297,7 +297,7 @@ jobs:
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
-            -f ./websearch/manifest.yml \
+            -f ./websearch-mcp/manifest.yml \
             -p "./websearch/${ARTIFACT}"
 
           echo "Web Search MCP deployed to nonprod: ${DEPLOY_NAME}"
@@ -443,7 +443,7 @@ jobs:
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
-            -f ./fetch/manifest.yml \
+            -f ./fetch-mcp/manifest.yml \
             -p "./fetch/${ARTIFACT}"
 
           echo "Fetch MCP deployed to prod: ${DEPLOY_NAME}"
@@ -468,7 +468,7 @@ jobs:
 
           echo "Deploying ${DEPLOY_NAME}..."
           ./cf8 push "${DEPLOY_NAME}" \
-            -f ./websearch/manifest.yml \
+            -f ./websearch-mcp/manifest.yml \
             -p "./websearch/${ARTIFACT}"
 
           echo "Web Search MCP deployed to prod: ${DEPLOY_NAME}"
