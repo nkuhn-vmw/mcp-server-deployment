@@ -228,6 +228,8 @@ jobs:
     needs: validate-and-prepare
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install CF CLI
         run: |
           curl -sL "https://packages.cloudfoundry.org/stable?release=linux64-binary&version=${{ env.CF_CLI_VERSION }}&source=github" | tar -zx
@@ -301,6 +303,52 @@ jobs:
           ./cf8 start "${DEPLOY_NAME}"
 
           echo "Web Search MCP deployed to nonprod: ${DEPLOY_NAME}"
+
+      - name: Configure Authentication for git push
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@${GHE_HOST}/${{ github.repository }}.git"
+          else
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@github.com/${{ github.repository }}.git"
+          fi
+
+      - name: Record nonprod deployed versions
+        run: |
+          DEPLOY_FETCH="${{ needs.validate-and-prepare.outputs.deploy_fetch }}"
+          DEPLOY_WEBSEARCH="${{ needs.validate-and-prepare.outputs.deploy_websearch }}"
+
+          CHANGED=false
+
+          if [ "$DEPLOY_FETCH" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.fetch_release_tag }}" > .last-deployed-fetch-mcp-nonprod
+            git add .last-deployed-fetch-mcp-nonprod
+            CHANGED=true
+          fi
+
+          if [ "$DEPLOY_WEBSEARCH" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.websearch_release_tag }}" > .last-deployed-websearch-mcp-nonprod
+            git add .last-deployed-websearch-mcp-nonprod
+            CHANGED=true
+          fi
+
+          if [ "$CHANGED" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            MSG="Record nonprod deployment:"
+            if [ "$DEPLOY_FETCH" = "true" ]; then
+              MSG="${MSG} fetch-mcp=${{ needs.validate-and-prepare.outputs.fetch_release_tag }}"
+            fi
+            if [ "$DEPLOY_WEBSEARCH" = "true" ]; then
+              MSG="${MSG} websearch-mcp=${{ needs.validate-and-prepare.outputs.websearch_release_tag }}"
+            fi
+
+            git diff --cached --quiet || git commit -m "${MSG}"
+            git push
+          fi
 
   # ──────────────────────────────────────────────────────────────
   # Job 3: Send approval notification
@@ -487,22 +535,24 @@ jobs:
             git remote set-url origin "https://x-access-token:${GHE_TOKEN}@github.com/${{ github.repository }}.git"
           fi
 
-      - name: Record deployed versions
+      - name: Record prod deployed versions
         run: |
           DEPLOY_FETCH="${{ needs.validate-and-prepare.outputs.deploy_fetch }}"
           DEPLOY_WEBSEARCH="${{ needs.validate-and-prepare.outputs.deploy_websearch }}"
 
           CHANGED=false
 
+          git pull --rebase
+
           if [ "$DEPLOY_FETCH" = "true" ]; then
-            echo "${{ needs.validate-and-prepare.outputs.fetch_release_tag }}" > .last-deployed-fetch-mcp
-            git add .last-deployed-fetch-mcp
+            echo "${{ needs.validate-and-prepare.outputs.fetch_release_tag }}" > .last-deployed-fetch-mcp-prod
+            git add .last-deployed-fetch-mcp-prod
             CHANGED=true
           fi
 
           if [ "$DEPLOY_WEBSEARCH" = "true" ]; then
-            echo "${{ needs.validate-and-prepare.outputs.websearch_release_tag }}" > .last-deployed-websearch-mcp
-            git add .last-deployed-websearch-mcp
+            echo "${{ needs.validate-and-prepare.outputs.websearch_release_tag }}" > .last-deployed-websearch-mcp-prod
+            git add .last-deployed-websearch-mcp-prod
             CHANGED=true
           fi
 
@@ -510,7 +560,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            MSG="Record deployment:"
+            MSG="Record prod deployment:"
             if [ "$DEPLOY_FETCH" = "true" ]; then
               MSG="${MSG} fetch-mcp=${{ needs.validate-and-prepare.outputs.fetch_release_tag }}"
             fi
