@@ -69,6 +69,27 @@ jobs:
             echo "Authenticated to github.com"
           fi
 
+      - name: Show configuration summary
+        env:
+          APP1_NAME: ${{ secrets.APP1_NAME }}
+          APP2_NAME: ${{ secrets.APP2_NAME }}
+          APP1_UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
+          APP2_UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
+        run: |
+          echo "=========================================="
+          echo "DEPLOYMENT CONFIGURATION"
+          echo "=========================================="
+          echo "App 1 (app1_release_tag):  ${APP1_NAME}"
+          echo "  Upstream repo:           ${APP1_UPSTREAM_REPO}"
+          echo "  Deploy:                  ${{ inputs.deploy_app1 }}"
+          echo "  Release tag:             ${{ inputs.app1_release_tag }}"
+          echo "------------------------------------------"
+          echo "App 2 (app2_release_tag):  ${APP2_NAME}"
+          echo "  Upstream repo:           ${APP2_UPSTREAM_REPO}"
+          echo "  Deploy:                  ${{ inputs.deploy_app2 }}"
+          echo "  Release tag:             ${{ inputs.app2_release_tag }}"
+          echo "=========================================="
+
       - name: Validate inputs
         run: |
           DEPLOY_APP1="${{ inputs.deploy_app1 }}"
