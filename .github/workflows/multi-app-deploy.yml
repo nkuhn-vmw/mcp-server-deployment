@@ -4,9 +4,13 @@ name: Deploy MCP App Group 1 to Cloud Foundry
 on:
   workflow_dispatch:
     inputs:
-      release_tag:
-        description: 'Release tag to deploy (e.g., v2.7.0)'
-        required: true
+      app1_release_tag:
+        description: 'App 1 release tag (e.g., v2.7.0)'
+        required: false
+        type: string
+      app2_release_tag:
+        description: 'App 2 release tag (e.g., v2.7.0)'
+        required: false
         type: string
       deploy_app1:
         description: 'Deploy Application 1'
@@ -18,11 +22,6 @@ on:
         required: false
         type: boolean
         default: true
-      skip_nonprod:
-        description: 'Skip non-prod deployment (deploy directly to prod)'
-        required: false
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -34,14 +33,17 @@ env:
 
 jobs:
   # ──────────────────────────────────────────────────────────────
-  # Job 1: Validate release and prepare artifacts
+  # Job 1: Validate releases and prepare artifacts
   # ──────────────────────────────────────────────────────────────
   validate-and-prepare:
     runs-on: ubuntu-latest
     outputs:
-      release_tag: ${{ steps.validate.outputs.release_tag }}
-      version: ${{ steps.validate.outputs.version }}
-      version_dotted: ${{ steps.validate.outputs.version_dotted }}
+      app1_release_tag: ${{ steps.validate.outputs.app1_release_tag }}
+      app1_version: ${{ steps.validate.outputs.app1_version }}
+      app1_version_dotted: ${{ steps.validate.outputs.app1_version_dotted }}
+      app2_release_tag: ${{ steps.validate.outputs.app2_release_tag }}
+      app2_version: ${{ steps.validate.outputs.app2_version }}
+      app2_version_dotted: ${{ steps.validate.outputs.app2_version_dotted }}
       deploy_app1: ${{ steps.validate.outputs.deploy_app1 }}
       deploy_app2: ${{ steps.validate.outputs.deploy_app2 }}
     steps:
@@ -58,78 +60,97 @@ jobs:
           fi
 
           if [ -n "$GHE_HOST" ]; then
-            # Authenticate gh CLI to GitHub Enterprise Server
             echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
             gh auth status --hostname "${GHE_HOST}"
             echo "Authenticated to GitHub Enterprise: ${GHE_HOST}"
           else
-            # Authenticate gh CLI to github.com
             echo "${GHE_TOKEN}" | gh auth login --with-token
             gh auth status
             echo "Authenticated to github.com"
           fi
 
-      - name: Validate release
+      - name: Validate inputs
+        run: |
+          DEPLOY_APP1="${{ inputs.deploy_app1 }}"
+          DEPLOY_APP2="${{ inputs.deploy_app2 }}"
+          APP1_TAG="${{ inputs.app1_release_tag }}"
+          APP2_TAG="${{ inputs.app2_release_tag }}"
+
+          if [ "$DEPLOY_APP1" = "true" ] && [ -z "$APP1_TAG" ]; then
+            echo "Error: app1_release_tag is required when deploy_app1 is enabled"
+            exit 1
+          fi
+
+          if [ "$DEPLOY_APP2" = "true" ] && [ -z "$APP2_TAG" ]; then
+            echo "Error: app2_release_tag is required when deploy_app2 is enabled"
+            exit 1
+          fi
+
+      - name: Validate releases
         id: validate
         env:
           GH_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.APP_UPSTREAM_REPO }}
+          APP1_UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
+          APP2_UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
         run: |
-          if [ -z "$UPSTREAM_REPO" ]; then
-            echo "Error: APP_UPSTREAM_REPO secret is not set"
-            exit 1
+          DEPLOY_APP1="${{ inputs.deploy_app1 }}"
+          DEPLOY_APP2="${{ inputs.deploy_app2 }}"
+
+          # Validate App 1 release
+          if [ "$DEPLOY_APP1" = "true" ]; then
+            APP1_TAG="${{ inputs.app1_release_tag }}"
+            echo "Validating App 1 release ${APP1_TAG} in ${APP1_UPSTREAM_REPO}..."
+            RELEASE_INFO=$(gh api "repos/${APP1_UPSTREAM_REPO}/releases/tags/${APP1_TAG}" --jq '.tag_name' 2>&1) || {
+              echo "Error: Release ${APP1_TAG} not found in ${APP1_UPSTREAM_REPO}"
+              echo "API response: ${RELEASE_INFO}"
+              exit 1
+            }
+            echo "App 1 release validated: ${RELEASE_INFO}"
+
+            APP1_VERSION=${APP1_TAG#v}
+            APP1_APP_VERSION=${APP1_VERSION//./-}
+            echo "app1_release_tag=${APP1_TAG}" >> "$GITHUB_OUTPUT"
+            echo "app1_version=${APP1_APP_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "app1_version_dotted=${APP1_VERSION}" >> "$GITHUB_OUTPUT"
           fi
 
-          RELEASE_TAG="${{ inputs.release_tag }}"
+          # Validate App 2 release
+          if [ "$DEPLOY_APP2" = "true" ]; then
+            APP2_TAG="${{ inputs.app2_release_tag }}"
+            echo "Validating App 2 release ${APP2_TAG} in ${APP2_UPSTREAM_REPO}..."
+            RELEASE_INFO=$(gh api "repos/${APP2_UPSTREAM_REPO}/releases/tags/${APP2_TAG}" --jq '.tag_name' 2>&1) || {
+              echo "Error: Release ${APP2_TAG} not found in ${APP2_UPSTREAM_REPO}"
+              echo "API response: ${RELEASE_INFO}"
+              exit 1
+            }
+            echo "App 2 release validated: ${RELEASE_INFO}"
 
-          # Validate the release exists in the upstream repo
-          echo "Validating release ${RELEASE_TAG} exists in ${UPSTREAM_REPO}..."
-          RELEASE_INFO=$(gh api "repos/${UPSTREAM_REPO}/releases/tags/${RELEASE_TAG}" --jq '.tag_name' 2>&1) || {
-            echo "Error: Release ${RELEASE_TAG} not found in ${UPSTREAM_REPO}"
-            echo "API response: ${RELEASE_INFO}"
-            exit 1
-          }
-          echo "Release validated: ${RELEASE_INFO}"
-
-          # Check against last deployed version
-          LAST_DEPLOYED=""
-          if [ -f .last-deployed-version ]; then
-            LAST_DEPLOYED=$(cat .last-deployed-version)
+            APP2_VERSION=${APP2_TAG#v}
+            APP2_APP_VERSION=${APP2_VERSION//./-}
+            echo "app2_release_tag=${APP2_TAG}" >> "$GITHUB_OUTPUT"
+            echo "app2_version=${APP2_APP_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "app2_version_dotted=${APP2_VERSION}" >> "$GITHUB_OUTPUT"
           fi
 
-          echo "Last deployed: ${LAST_DEPLOYED:-none}"
-          echo "Target release: ${RELEASE_TAG}"
-
-          if [ "$RELEASE_TAG" = "$LAST_DEPLOYED" ]; then
-            echo "::warning::Version ${RELEASE_TAG} was previously deployed. Proceeding with re-deployment as requested."
-          fi
-
-          VERSION=${RELEASE_TAG#v}
-          APP_VERSION=${VERSION//./-}
-
-          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "version=${APP_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "version_dotted=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "deploy_app1=${{ inputs.deploy_app1 }}" >> "$GITHUB_OUTPUT"
-          echo "deploy_app2=${{ inputs.deploy_app2 }}" >> "$GITHUB_OUTPUT"
+          echo "deploy_app1=${DEPLOY_APP1}" >> "$GITHUB_OUTPUT"
+          echo "deploy_app2=${DEPLOY_APP2}" >> "$GITHUB_OUTPUT"
 
       - name: Download App 1 release assets
         if: inputs.deploy_app1
         env:
           GH_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.APP_UPSTREAM_REPO }}
-          APP1_ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
+          UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
         run: |
-          VERSION_DOTTED="${{ steps.validate.outputs.version_dotted }}"
+          VERSION_DOTTED="${{ steps.validate.outputs.app1_version_dotted }}"
 
-          # Replace {version} placeholder in artifact pattern
-          PATTERN=$(echo "${APP1_ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           echo "Downloading App 1 artifact matching: ${PATTERN}"
 
           mkdir -p ./artifacts/app1
-          gh release download "${{ inputs.release_tag }}" \
+          gh release download "${{ inputs.app1_release_tag }}" \
             --repo "${UPSTREAM_REPO}" \
             --pattern "${PATTERN}" \
             --dir ./artifacts/app1
@@ -142,17 +163,16 @@ jobs:
         env:
           GH_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.APP_UPSTREAM_REPO }}
-          APP2_ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
+          UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
         run: |
-          VERSION_DOTTED="${{ steps.validate.outputs.version_dotted }}"
+          VERSION_DOTTED="${{ steps.validate.outputs.app2_version_dotted }}"
 
-          # Replace {version} placeholder in artifact pattern
-          PATTERN=$(echo "${APP2_ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           echo "Downloading App 2 artifact matching: ${PATTERN}"
 
           mkdir -p ./artifacts/app2
-          gh release download "${{ inputs.release_tag }}" \
+          gh release download "${{ inputs.app2_release_tag }}" \
             --repo "${UPSTREAM_REPO}" \
             --pattern "${PATTERN}" \
             --dir ./artifacts/app2
@@ -165,7 +185,6 @@ jobs:
           APP1_MANIFEST: ${{ secrets.APP1_MANIFEST_PATH }}
           APP2_MANIFEST: ${{ secrets.APP2_MANIFEST_PATH }}
         run: |
-          # Manifests are stored in this repo, not downloaded from upstream
           if [ "${{ inputs.deploy_app1 }}" = "true" ]; then
             MANIFEST_PATH="${APP1_MANIFEST:-manifests/app1/manifest.yml}"
             if [ ! -f "$MANIFEST_PATH" ]; then
@@ -207,9 +226,10 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   deploy-nonprod:
     needs: validate-and-prepare
-    if: inputs.skip_nonprod != true
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Install CF CLI
         run: |
           curl -sL "https://packages.cloudfoundry.org/stable?release=linux64-binary&version=${{ env.CF_CLI_VERSION }}&source=github" | tar -zx
@@ -239,17 +259,33 @@ jobs:
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
         env:
           APP1_NAME: ${{ secrets.APP1_NAME }}
-          VERSION: ${{ needs.validate-and-prepare.outputs.version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.version_dotted }}
-          APP1_ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.app1_version }}
+          APP1_CF_ENV_JSON: ${{ secrets.APP1_CF_ENV_JSON }}
         run: |
-          ARTIFACT=$(echo "${APP1_ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP1_NAME}-nonprod-${VERSION}"
+          ARTIFACT=$(ls ./app1/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
-          echo "Deploying ${DEPLOY_NAME}..."
-          ./cf8 push "${DEPLOY_NAME}" \
-            -f ./app1/manifest.yml \
-            -p "./app1/${ARTIFACT}"
+          if [ -n "$APP1_CF_ENV_JSON" ]; then
+            echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app1/manifest.yml \
+              -p "./app1/${ARTIFACT}" \
+              --no-start
+
+            echo "Setting env vars..."
+            echo "${APP1_CF_ENV_JSON}" | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r key value; do
+              ./cf8 set-env "${DEPLOY_NAME}" "$key" "$value"
+            done
+
+            echo "Starting ${DEPLOY_NAME}..."
+            ./cf8 start "${DEPLOY_NAME}"
+          else
+            echo "Deploying ${DEPLOY_NAME}..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app1/manifest.yml \
+              -p "./app1/${ARTIFACT}"
+          fi
 
           echo "App 1 deployed to nonprod: ${DEPLOY_NAME}"
 
@@ -264,19 +300,84 @@ jobs:
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
         env:
           APP2_NAME: ${{ secrets.APP2_NAME }}
-          VERSION: ${{ needs.validate-and-prepare.outputs.version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.version_dotted }}
-          APP2_ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.app2_version }}
+          APP2_CF_ENV_JSON: ${{ secrets.APP2_CF_ENV_JSON }}
         run: |
-          ARTIFACT=$(echo "${APP2_ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP2_NAME}-nonprod-${VERSION}"
+          ARTIFACT=$(ls ./app2/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
-          echo "Deploying ${DEPLOY_NAME}..."
-          ./cf8 push "${DEPLOY_NAME}" \
-            -f ./app2/manifest.yml \
-            -p "./app2/${ARTIFACT}"
+          if [ -n "$APP2_CF_ENV_JSON" ]; then
+            echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app2/manifest.yml \
+              -p "./app2/${ARTIFACT}" \
+              --no-start
+
+            echo "Setting env vars..."
+            echo "${APP2_CF_ENV_JSON}" | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r key value; do
+              ./cf8 set-env "${DEPLOY_NAME}" "$key" "$value"
+            done
+
+            echo "Starting ${DEPLOY_NAME}..."
+            ./cf8 start "${DEPLOY_NAME}"
+          else
+            echo "Deploying ${DEPLOY_NAME}..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app2/manifest.yml \
+              -p "./app2/${ARTIFACT}"
+          fi
 
           echo "App 2 deployed to nonprod: ${DEPLOY_NAME}"
+
+      - name: Configure Authentication for git push
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@${GHE_HOST}/${{ github.repository }}.git"
+          else
+            git remote set-url origin "https://x-access-token:${GHE_TOKEN}@github.com/${{ github.repository }}.git"
+          fi
+
+      - name: Record nonprod deployed versions
+        env:
+          APP1_NAME: ${{ secrets.APP1_NAME }}
+          APP2_NAME: ${{ secrets.APP2_NAME }}
+        run: |
+          DEPLOY_APP1="${{ needs.validate-and-prepare.outputs.deploy_app1 }}"
+          DEPLOY_APP2="${{ needs.validate-and-prepare.outputs.deploy_app2 }}"
+
+          CHANGED=false
+
+          if [ "$DEPLOY_APP1" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.app1_release_tag }}" > ".last-deployed-${APP1_NAME}-nonprod"
+            git add ".last-deployed-${APP1_NAME}-nonprod"
+            CHANGED=true
+          fi
+
+          if [ "$DEPLOY_APP2" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.app2_release_tag }}" > ".last-deployed-${APP2_NAME}-nonprod"
+            git add ".last-deployed-${APP2_NAME}-nonprod"
+            CHANGED=true
+          fi
+
+          if [ "$CHANGED" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            MSG="Record nonprod deployment:"
+            if [ "$DEPLOY_APP1" = "true" ]; then
+              MSG="${MSG} ${APP1_NAME}=${{ needs.validate-and-prepare.outputs.app1_release_tag }}"
+            fi
+            if [ "$DEPLOY_APP2" = "true" ]; then
+              MSG="${MSG} ${APP2_NAME}=${{ needs.validate-and-prepare.outputs.app2_release_tag }}"
+            fi
+
+            git diff --cached --quiet || git commit -m "${MSG}"
+            git push
+          fi
 
   # ──────────────────────────────────────────────────────────────
   # Job 3: Send approval notification
@@ -288,9 +389,6 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   notify-approval-required:
     needs: [validate-and-prepare, deploy-nonprod]
-    if: |
-      always() &&
-      (needs.deploy-nonprod.result == 'success' || needs.deploy-nonprod.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - name: Configure GitHub Authentication
@@ -312,7 +410,6 @@ jobs:
           APP1_NAME: ${{ secrets.APP1_NAME }}
           APP2_NAME: ${{ secrets.APP2_NAME }}
         run: |
-          RELEASE_TAG="${{ needs.validate-and-prepare.outputs.release_tag }}"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           DEPLOY_APP1="${{ needs.validate-and-prepare.outputs.deploy_app1 }}"
@@ -320,10 +417,14 @@ jobs:
 
           # Build description of what's being deployed
           APPS_LIST=""
-          if [ "$DEPLOY_APP1" = "true" ]; then APPS_LIST="${APP1_NAME}"; fi
+          if [ "$DEPLOY_APP1" = "true" ]; then
+            APP1_TAG="${{ needs.validate-and-prepare.outputs.app1_release_tag }}"
+            APPS_LIST="${APP1_NAME} (${APP1_TAG})"
+          fi
           if [ "$DEPLOY_APP2" = "true" ]; then
+            APP2_TAG="${{ needs.validate-and-prepare.outputs.app2_release_tag }}"
             if [ -n "$APPS_LIST" ]; then APPS_LIST="${APPS_LIST}, "; fi
-            APPS_LIST="${APPS_LIST}${APP2_NAME}"
+            APPS_LIST="${APPS_LIST}${APP2_NAME} (${APP2_TAG})"
           fi
 
           # Build reviewer mentions for notification
@@ -336,26 +437,27 @@ jobs:
             done
           fi
 
-          DESCRIPTION="Production deployment approval required for ${RELEASE_TAG}. Apps: ${APPS_LIST}. Review: ${RUN_URL} ${REVIEWERS_MENTION}"
+          DESCRIPTION="Production deployment approval required. Apps: ${APPS_LIST}. Review: ${RUN_URL} ${REVIEWERS_MENTION}"
 
           echo "=========================================="
           echo "PRODUCTION DEPLOYMENT APPROVAL REQUIRED"
           echo "=========================================="
-          echo "Release:    ${RELEASE_TAG}"
           echo "Apps:       ${APPS_LIST}"
           echo "Approve at: ${RUN_URL}"
           echo "Reviewers:  ${APPROVAL_REVIEWERS}"
           echo "=========================================="
 
           # Create a deployment event via GitHub API to trigger email notifications
-          # GitHub sends emails to repo watchers and mentioned users
           gh api "repos/${{ github.repository }}/deployments" \
-            -f ref="${{ github.sha }}" \
-            -f environment="production" \
-            -f description="${DESCRIPTION}" \
-            -f auto_merge=false \
-            -f required_contexts="[]" \
-            --silent 2>/dev/null || echo "::warning::Could not create deployment notification (non-blocking)"
+            --input - <<EOF || echo "::warning::Could not create deployment notification (non-blocking)"
+          {
+            "ref": "${{ github.sha }}",
+            "environment": "production-pending",
+            "description": "${DESCRIPTION}",
+            "auto_merge": false,
+            "required_contexts": []
+          }
+          EOF
 
   # ──────────────────────────────────────────────────────────────
   # Job 4: Deploy both apps to Production
@@ -372,9 +474,6 @@ jobs:
   # ──────────────────────────────────────────────────────────────
   deploy-prod:
     needs: [validate-and-prepare, deploy-nonprod]
-    if: |
-      always() &&
-      (needs.deploy-nonprod.result == 'success' || needs.deploy-nonprod.result == 'skipped')
     runs-on: ubuntu-latest
     environment: production
     steps:
@@ -409,17 +508,33 @@ jobs:
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
         env:
           APP1_NAME: ${{ secrets.APP1_NAME }}
-          VERSION: ${{ needs.validate-and-prepare.outputs.version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.version_dotted }}
-          APP1_ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.app1_version }}
+          APP1_CF_ENV_JSON: ${{ secrets.APP1_CF_ENV_JSON }}
         run: |
-          ARTIFACT=$(echo "${APP1_ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP1_NAME}-prod-${VERSION}"
+          ARTIFACT=$(ls ./app1/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
-          echo "Deploying ${DEPLOY_NAME}..."
-          ./cf8 push "${DEPLOY_NAME}" \
-            -f ./app1/manifest.yml \
-            -p "./app1/${ARTIFACT}"
+          if [ -n "$APP1_CF_ENV_JSON" ]; then
+            echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app1/manifest.yml \
+              -p "./app1/${ARTIFACT}" \
+              --no-start
+
+            echo "Setting env vars..."
+            echo "${APP1_CF_ENV_JSON}" | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r key value; do
+              ./cf8 set-env "${DEPLOY_NAME}" "$key" "$value"
+            done
+
+            echo "Starting ${DEPLOY_NAME}..."
+            ./cf8 start "${DEPLOY_NAME}"
+          else
+            echo "Deploying ${DEPLOY_NAME}..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app1/manifest.yml \
+              -p "./app1/${ARTIFACT}"
+          fi
 
           echo "App 1 deployed to prod: ${DEPLOY_NAME}"
 
@@ -434,17 +549,33 @@ jobs:
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
         env:
           APP2_NAME: ${{ secrets.APP2_NAME }}
-          VERSION: ${{ needs.validate-and-prepare.outputs.version }}
-          VERSION_DOTTED: ${{ needs.validate-and-prepare.outputs.version_dotted }}
-          APP2_ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.app2_version }}
+          APP2_CF_ENV_JSON: ${{ secrets.APP2_CF_ENV_JSON }}
         run: |
-          ARTIFACT=$(echo "${APP2_ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
           DEPLOY_NAME="${APP2_NAME}-prod-${VERSION}"
+          ARTIFACT=$(ls ./app2/ | grep -v manifest.yml | head -1)
+          echo "Artifact found: ${ARTIFACT}"
 
-          echo "Deploying ${DEPLOY_NAME}..."
-          ./cf8 push "${DEPLOY_NAME}" \
-            -f ./app2/manifest.yml \
-            -p "./app2/${ARTIFACT}"
+          if [ -n "$APP2_CF_ENV_JSON" ]; then
+            echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app2/manifest.yml \
+              -p "./app2/${ARTIFACT}" \
+              --no-start
+
+            echo "Setting env vars..."
+            echo "${APP2_CF_ENV_JSON}" | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r key value; do
+              ./cf8 set-env "${DEPLOY_NAME}" "$key" "$value"
+            done
+
+            echo "Starting ${DEPLOY_NAME}..."
+            ./cf8 start "${DEPLOY_NAME}"
+          else
+            echo "Deploying ${DEPLOY_NAME}..."
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./app2/manifest.yml \
+              -p "./app2/${ARTIFACT}"
+          fi
 
           echo "App 2 deployed to prod: ${DEPLOY_NAME}"
 
@@ -459,11 +590,42 @@ jobs:
             git remote set-url origin "https://x-access-token:${GHE_TOKEN}@github.com/${{ github.repository }}.git"
           fi
 
-      - name: Record deployed version
+      - name: Record prod deployed versions
+        env:
+          APP1_NAME: ${{ secrets.APP1_NAME }}
+          APP2_NAME: ${{ secrets.APP2_NAME }}
         run: |
-          echo "${{ needs.validate-and-prepare.outputs.release_tag }}" > .last-deployed-version
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add .last-deployed-version
-          git diff --cached --quiet || git commit -m "Record deployment of ${{ needs.validate-and-prepare.outputs.release_tag }}"
-          git push
+          DEPLOY_APP1="${{ needs.validate-and-prepare.outputs.deploy_app1 }}"
+          DEPLOY_APP2="${{ needs.validate-and-prepare.outputs.deploy_app2 }}"
+
+          CHANGED=false
+
+          git pull --rebase
+
+          if [ "$DEPLOY_APP1" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.app1_release_tag }}" > ".last-deployed-${APP1_NAME}-prod"
+            git add ".last-deployed-${APP1_NAME}-prod"
+            CHANGED=true
+          fi
+
+          if [ "$DEPLOY_APP2" = "true" ]; then
+            echo "${{ needs.validate-and-prepare.outputs.app2_release_tag }}" > ".last-deployed-${APP2_NAME}-prod"
+            git add ".last-deployed-${APP2_NAME}-prod"
+            CHANGED=true
+          fi
+
+          if [ "$CHANGED" = "true" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            MSG="Record prod deployment:"
+            if [ "$DEPLOY_APP1" = "true" ]; then
+              MSG="${MSG} ${APP1_NAME}=${{ needs.validate-and-prepare.outputs.app1_release_tag }}"
+            fi
+            if [ "$DEPLOY_APP2" = "true" ]; then
+              MSG="${MSG} ${APP2_NAME}=${{ needs.validate-and-prepare.outputs.app2_release_tag }}"
+            fi
+
+            git diff --cached --quiet || git commit -m "${MSG}"
+            git push
+          fi
