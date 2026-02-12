@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload fetch-t2 artifacts
         if: inputs.deploy_fetch_t2
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3-node20
         with:
           name: fetch_t2-release-assets
           path: ./artifacts/fetch_t2/
@@ -244,7 +244,7 @@ jobs:
 
       - name: Upload web-t2 artifacts
         if: inputs.deploy_web_t2
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3-node20
         with:
           name: web_t2-release-assets
           path: ./artifacts/web_t2/
@@ -279,7 +279,7 @@ jobs:
 
       - name: Download fetch-t2 artifacts
         if: needs.validate-and-prepare.outputs.deploy_fetch_t2 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: fetch_t2-release-assets
           path: ./fetch_t2
@@ -320,7 +320,7 @@ jobs:
 
       - name: Download web-t2 artifacts
         if: needs.validate-and-prepare.outputs.deploy_web_t2 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: web_t2-release-assets
           path: ./web_t2
@@ -529,7 +529,7 @@ jobs:
 
       - name: Download fetch-t2 artifacts
         if: needs.validate-and-prepare.outputs.deploy_fetch_t2 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: fetch_t2-release-assets
           path: ./fetch_t2
@@ -570,7 +570,7 @@ jobs:
 
       - name: Download web-t2 artifacts
         if: needs.validate-and-prepare.outputs.deploy_web_t2 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: web_t2-release-assets
           path: ./web_t2

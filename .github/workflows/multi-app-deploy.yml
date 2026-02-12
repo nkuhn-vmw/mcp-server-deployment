@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload App 1 artifacts
         if: inputs.deploy_app1
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3-node20
         with:
           name: app1-release-assets
           path: ./artifacts/app1/
@@ -244,7 +244,7 @@ jobs:
 
       - name: Upload App 2 artifacts
         if: inputs.deploy_app2
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3-node20
         with:
           name: app2-release-assets
           path: ./artifacts/app2/
@@ -279,7 +279,7 @@ jobs:
 
       - name: Download App 1 artifacts
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: app1-release-assets
           path: ./app1
@@ -320,7 +320,7 @@ jobs:
 
       - name: Download App 2 artifacts
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: app2-release-assets
           path: ./app2
@@ -529,7 +529,7 @@ jobs:
 
       - name: Download App 1 artifacts
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: app1-release-assets
           path: ./app1
@@ -570,7 +570,7 @@ jobs:
 
       - name: Download App 2 artifacts
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: app2-release-assets
           path: ./app2

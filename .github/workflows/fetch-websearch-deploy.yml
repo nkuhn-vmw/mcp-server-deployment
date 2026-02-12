@@ -210,7 +210,7 @@ jobs:
 
       - name: Upload Fetch MCP artifacts
         if: inputs.deploy_fetch
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3-node20
         with:
           name: fetch-mcp-release-assets
           path: ./artifacts/fetch/
@@ -218,7 +218,7 @@ jobs:
 
       - name: Upload Web Search MCP artifacts
         if: inputs.deploy_websearch
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v3-node20
         with:
           name: websearch-mcp-release-assets
           path: ./artifacts/websearch/
@@ -253,7 +253,7 @@ jobs:
 
       - name: Download Fetch MCP artifacts
         if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: fetch-mcp-release-assets
           path: ./fetch
@@ -277,7 +277,7 @@ jobs:
 
       - name: Download Web Search MCP artifacts
         if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: websearch-mcp-release-assets
           path: ./websearch
@@ -474,7 +474,7 @@ jobs:
 
       - name: Download Fetch MCP artifacts
         if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: fetch-mcp-release-assets
           path: ./fetch
@@ -498,7 +498,7 @@ jobs:
 
       - name: Download Web Search MCP artifacts
         if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v3-node20
         with:
           name: websearch-mcp-release-assets
           path: ./websearch
