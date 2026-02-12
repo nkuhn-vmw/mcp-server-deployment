@@ -4,13 +4,13 @@ Deploy MCP server applications to Cloud Foundry with a nonprod/prod pipeline and
 
 ## How It Works
 
-This repo uses a **template-based** approach. A single template workflow (`multi-app-deploy.yml`) defines the deployment pipeline. You run the setup script once per pair of applications to:
+This repo uses a **generator-based** approach. The setup script programmatically generates deployment workflow YAML for any number of applications (1, 2, 3, or more). You run the setup script once per app group to:
 
 1. Generate an app-specific workflow YAML (e.g., `deploy-fetch-t1-web-t1.yml`)
 2. Configure all required GitHub secrets with app-specific prefixes
 3. Save a debug file with all configured values for troubleshooting
 
-You can run the setup script multiple times to create workflows for many different app pairs, all sharing the same CF credentials and approval gate.
+You can run the setup script multiple times to create workflows for many different app groups, all sharing the same CF credentials and approval gate.
 
 ## Quick Start
 
@@ -23,9 +23,10 @@ You can run the setup script multiple times to create workflows for many differe
 The interactive script will prompt for:
 - **Platform** - github.com or GitHub Enterprise Server
 - **Shared secrets** (first run) - GitHub PAT, CF credentials (nonprod + prod), approval reviewers
-- **App 1 & App 2** - Name, upstream repo, manifest path, artifact pattern, optional env vars
+- **Number of apps** - How many applications in this deployment group (1-10)
+- **Per-app details** - Name, upstream repo, manifest path, artifact pattern, optional env vars
 
-The script generates a workflow at `.github/workflows/deploy-{app1}-{app2}.yml` and a debug file at `.multi-app-secrets-debug-{app1}-{app2}.txt`.
+The script generates a workflow at `.github/workflows/deploy-{app1}-{app2}-...yml` and a debug file at `.multi-app-secrets-debug-{slug}.txt`.
 
 ### 2. Add CF Manifests
 
@@ -68,12 +69,12 @@ Each generated workflow has 4 jobs:
 
 ### Workflow Inputs
 
+Each app in the group gets two inputs:
+
 | Input | Description | Default |
 |-------|-------------|---------|
-| `{app1}_release_tag` | App 1 release tag (e.g., `v2.7.0`) | *required if deploying* |
-| `{app2}_release_tag` | App 2 release tag (e.g., `v1.0.0`) | *required if deploying* |
-| `deploy_{app1}` | Deploy App 1 | `true` |
-| `deploy_{app2}` | Deploy App 2 | `true` |
+| `{app}_release_tag` | Release tag for the app (e.g., `v2.7.0`) | *required if deploying* |
+| `deploy_{app}` | Whether to deploy this app | `true` |
 
 Each app has its own release tag and can be deployed independently.
 
@@ -124,13 +125,12 @@ All secrets are configured automatically by the setup script. Secret names use a
 | File | Purpose |
 |------|---------|
 | `multi-app-setup-secrets.sh` | Interactive setup script - generates workflows and configures secrets |
-| `.github/workflows/multi-app-deploy.yml` | Template workflow (do not run directly) |
 | `.github/workflows/deploy-*.yml` | Generated workflows (created by setup script) |
 | `.multi-app-secrets-debug-*.txt` | Debug files with all secret values (gitignored) |
 | `manifests/` | CF manifest files for each application |
 
 ## GHES Compatibility
 
-Tested with GitHub Enterprise Server 3.14+. The workflows use `actions/upload-artifact@v3-node20` and `actions/download-artifact@v3-node20` for GHES compatibility (v4 artifact actions are not supported on GHES).
+Tested with GitHub Enterprise Server 3.14+. The workflows download release assets directly via `gh release download` (no artifact actions required).
 
 Self-hosted runners must have `gh` CLI >= 2.0 and `jq` installed.
