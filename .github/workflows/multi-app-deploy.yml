@@ -115,11 +115,12 @@ jobs:
       - name: Validate releases
         id: validate
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           APP1_UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
           APP2_UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           DEPLOY_APP1="${{ inputs.deploy_app1 }}"
           DEPLOY_APP2="${{ inputs.deploy_app2 }}"
 
@@ -165,11 +166,12 @@ jobs:
       - name: Download App 1 release assets
         if: inputs.deploy_app1
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
           ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           VERSION_DOTTED="${{ steps.validate.outputs.app1_version_dotted }}"
 
           PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
@@ -187,11 +189,12 @@ jobs:
       - name: Download App 2 release assets
         if: inputs.deploy_app2
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
           ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           VERSION_DOTTED="${{ steps.validate.outputs.app2_version_dotted }}"
 
           PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
@@ -430,12 +433,13 @@ jobs:
 
       - name: Send deployment approval notification
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           APPROVAL_REVIEWERS: ${{ secrets.APPROVAL_REVIEWERS }}
           APP1_NAME: ${{ secrets.APP1_NAME }}
           APP2_NAME: ${{ secrets.APP2_NAME }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           DEPLOY_APP1="${{ needs.validate-and-prepare.outputs.deploy_app1 }}"

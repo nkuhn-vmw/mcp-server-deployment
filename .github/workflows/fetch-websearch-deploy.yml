@@ -89,11 +89,12 @@ jobs:
       - name: Validate releases
         id: validate
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           FETCH_UPSTREAM_REPO: ${{ secrets.FETCH_MCP_UPSTREAM_REPO }}
           WEBSEARCH_UPSTREAM_REPO: ${{ secrets.WEBSEARCH_MCP_UPSTREAM_REPO }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           DEPLOY_FETCH="${{ inputs.deploy_fetch }}"
           DEPLOY_WEBSEARCH="${{ inputs.deploy_websearch }}"
 
@@ -139,11 +140,12 @@ jobs:
       - name: Download Fetch MCP release assets
         if: inputs.deploy_fetch
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           UPSTREAM_REPO: ${{ secrets.FETCH_MCP_UPSTREAM_REPO }}
           ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           VERSION_DOTTED="${{ steps.validate.outputs.fetch_version_dotted }}"
 
           PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
@@ -161,11 +163,12 @@ jobs:
       - name: Download Web Search MCP release assets
         if: inputs.deploy_websearch
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           UPSTREAM_REPO: ${{ secrets.WEBSEARCH_MCP_UPSTREAM_REPO }}
           ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           VERSION_DOTTED="${{ steps.validate.outputs.websearch_version_dotted }}"
 
           PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
@@ -375,12 +378,13 @@ jobs:
 
       - name: Send deployment approval notification
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           APPROVAL_REVIEWERS: ${{ secrets.APPROVAL_REVIEWERS }}
           FETCH_NAME: ${{ secrets.FETCH_MCP_NAME }}
           WEBSEARCH_NAME: ${{ secrets.WEBSEARCH_MCP_NAME }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           DEPLOY_FETCH="${{ needs.validate-and-prepare.outputs.deploy_fetch }}"

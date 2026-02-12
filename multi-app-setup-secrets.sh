@@ -200,8 +200,9 @@ generate_workflow() {
         echo "# App 1: ${APP1_NAME} (secrets prefix: ${APP1_UPPER}_*)"
         echo "# App 2: ${APP2_NAME} (secrets prefix: ${APP2_UPPER}_*)"
         echo "#"
-        # Skip the template header comment block (lines starting with #) and blank lines before 'name:'
-        sed -e "s|APP1|${APP1_UPPER}|g" \
+        # Strip the 5-line template header, then do app-specific replacements
+        tail -n +6 "$template" | sed \
+            -e "s|APP1|${APP1_UPPER}|g" \
             -e "s|app1|${APP1_LOWER}|g" \
             -e "s|App 1|${APP1_NAME}|g" \
             -e "s|Application 1|${APP1_NAME}|g" \
@@ -210,8 +211,7 @@ generate_workflow() {
             -e "s|App 2|${APP2_NAME}|g" \
             -e "s|Application 2|${APP2_NAME}|g" \
             -e "s|Deploy MCP App Group 1|Deploy ${APP1_NAME} \& ${APP2_NAME}|g" \
-            -e "s|MCP App Group 1|${APP1_NAME} \& ${APP2_NAME}|g" \
-            "$template"
+            -e "s|MCP App Group 1|${APP1_NAME} \& ${APP2_NAME}|g"
     } > "$GENERATED_WORKFLOW"
 
     print_success "Workflow generated: ${BOLD}${GENERATED_WORKFLOW}${NC}"

@@ -3,11 +3,6 @@
 # App 1: fetch-t1 (secrets prefix: FETCH_T1_*)
 # App 2: web-t1 (secrets prefix: WEB_T1_*)
 #
-# ============================================================================
-# TEMPLATE — Do not run this workflow directly.
-# Use multi-app-setup-secrets.sh to generate a concrete workflow with
-# app-specific names and secrets for each pair of applications.
-# ============================================================================
 name: Deploy fetch-t1 & web-t1 to Cloud Foundry
 
 # On-demand only — manually triggered from the Actions tab
@@ -120,11 +115,12 @@ jobs:
       - name: Validate releases
         id: validate
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           FETCH_T1_UPSTREAM_REPO: ${{ secrets.FETCH_T1_UPSTREAM_REPO }}
           WEB_T1_UPSTREAM_REPO: ${{ secrets.WEB_T1_UPSTREAM_REPO }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           DEPLOY_FETCH_T1="${{ inputs.deploy_fetch_t1 }}"
           DEPLOY_WEB_T1="${{ inputs.deploy_web_t1 }}"
 
@@ -170,11 +166,12 @@ jobs:
       - name: Download fetch-t1 release assets
         if: inputs.deploy_fetch_t1
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           UPSTREAM_REPO: ${{ secrets.FETCH_T1_UPSTREAM_REPO }}
           ARTIFACT_PATTERN: ${{ secrets.FETCH_T1_ARTIFACT_PATTERN }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           VERSION_DOTTED="${{ steps.validate.outputs.fetch_t1_version_dotted }}"
 
           PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
@@ -192,11 +189,12 @@ jobs:
       - name: Download web-t1 release assets
         if: inputs.deploy_web_t1
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           UPSTREAM_REPO: ${{ secrets.WEB_T1_UPSTREAM_REPO }}
           ARTIFACT_PATTERN: ${{ secrets.WEB_T1_ARTIFACT_PATTERN }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           VERSION_DOTTED="${{ steps.validate.outputs.web_t1_version_dotted }}"
 
           PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
@@ -435,12 +433,13 @@ jobs:
 
       - name: Send deployment approval notification
         env:
-          GH_HOST: ${{ secrets.GHE_HOST }}
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
           GH_TOKEN: ${{ secrets.GHE_TOKEN }}
           APPROVAL_REVIEWERS: ${{ secrets.APPROVAL_REVIEWERS }}
           FETCH_T1_NAME: ${{ secrets.FETCH_T1_NAME }}
           WEB_T1_NAME: ${{ secrets.WEB_T1_NAME }}
         run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
           RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
           DEPLOY_FETCH_T1="${{ needs.validate-and-prepare.outputs.deploy_fetch_t1 }}"
