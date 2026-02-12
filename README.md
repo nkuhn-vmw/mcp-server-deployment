@@ -1,71 +1,43 @@
 # MCP Server Deployment
 
-Deploy MCP server applications to Cloud Foundry with a nonprod/prod pipeline and manual approval gate for production. Works with both **github.com** and **GitHub Enterprise Server**.
+Deploy MCP server applications to Cloud Foundry with a nonprod/prod pipeline and manual approval gate for production. Works with both **github.com** and **GitHub Enterprise Server** (3.14+).
 
-This repo contains two deployment workflows, each deploying a pair of applications from their upstream release repos.
+## How It Works
 
-## Workflows
+This repo uses a **template-based** approach. A single template workflow (`multi-app-deploy.yml`) defines the deployment pipeline. You run the setup script once per pair of applications to:
 
-### 1. Deploy MCP App Group 1 (`multi-app-deploy.yml`)
+1. Generate an app-specific workflow YAML (e.g., `deploy-fetch-t1-web-t1.yml`)
+2. Configure all required GitHub secrets with app-specific prefixes
+3. Save a debug file with all configured values for troubleshooting
 
-Deploys two applications from a **single shared upstream repo**.
-
-| Input | Description | Default |
-|-------|-------------|---------|
-| `release_tag` | Release tag to deploy (e.g., `v2.7.0`) | *required* |
-| `deploy_app1` | Deploy Application 1 | `true` |
-| `deploy_app2` | Deploy Application 2 | `true` |
-| `skip_nonprod` | Skip nonprod, deploy directly to prod | `false` |
-
-### 2. Deploy Fetch and Web Search MCP Servers (`fetch-websearch-deploy.yml`)
-
-Deploys [spring-fetch-mcp](https://github.com/nkuhn-vmw/spring-fetch-mcp) and [web-search-mcp](https://github.com/nkuhn-vmw/web-search-mcp) from their **separate upstream repos** with independent release tags.
-
-| Input | Description | Default |
-|-------|-------------|---------|
-| `fetch_release_tag` | Fetch MCP release tag (e.g., `v1.2.0`) | *required if deploying* |
-| `websearch_release_tag` | Web Search MCP release tag (e.g., `v1.0.0`) | *required if deploying* |
-| `deploy_fetch` | Deploy Fetch MCP Server | `true` |
-| `deploy_websearch` | Deploy Web Search MCP Server | `true` |
-| `skip_nonprod` | Skip nonprod, deploy directly to prod | `false` |
-
-### Pipeline Structure (both workflows)
-
-1. **Validate & Prepare** - Authenticates to GitHub (or GHE), validates release tags exist, downloads release artifacts, and copies CF manifests from this repo.
-2. **Deploy to Nonprod** - Pushes apps to the nonprod CF foundation. Can be skipped.
-3. **Notify Approval Required** - Creates a deployment notification. GitHub emails the configured environment reviewers.
-4. **Deploy to Prod** - Gated by the `production` environment's required reviewers. Once approved, pushes apps to prod and records the deployed versions.
+You can run the setup script multiple times to create workflows for many different app pairs, all sharing the same CF credentials and approval gate.
 
 ## Quick Start
 
-### 1. Configure Secrets
-
-Each workflow has its own interactive setup script:
+### 1. Generate a Workflow and Configure Secrets
 
 ```bash
-./setup-secrets.sh                      # App Group 1
-./setup-secrets-fetch-websearch.sh      # Fetch & Web Search MCP Servers
+./multi-app-setup-secrets.sh
 ```
 
-Both scripts ask whether you're using **github.com** or **GitHub Enterprise Server**. The Fetch & Web Search script also lets you skip shared secrets (GitHub auth, CF credentials, approval reviewers) if you've already configured them via the other script.
+The interactive script will prompt for:
+- **Platform** - github.com or GitHub Enterprise Server
+- **Shared secrets** (first run) - GitHub PAT, CF credentials (nonprod + prod), approval reviewers
+- **App 1 & App 2** - Name, upstream repo, manifest path, artifact pattern, optional env vars
+
+The script generates a workflow at `.github/workflows/deploy-{app1}-{app2}.yml` and a debug file at `.multi-app-secrets-debug-{app1}-{app2}.txt`.
 
 ### 2. Add CF Manifests
 
-Create manifest files for each application:
+Create manifest files for each application. Paths are configurable via the setup script:
 
 ```
 manifests/
-  app1/
-    manifest.yml
-  app2/
-    manifest.yml
   fetch-mcp/
     manifest.yml
   websearch-mcp/
     manifest.yml
 ```
-
-Paths are configurable via their respective manifest path secrets.
 
 ### 3. Configure the Production Approval Gate
 
@@ -73,68 +45,92 @@ Paths are configurable via their respective manifest path secrets.
 2. Enable **Required reviewers** and add the users/teams who should approve production deployments
 3. GitHub will email those reviewers when any workflow reaches the prod deployment step
 
-### 4. Trigger a Deployment
+### 4. Commit and Push
 
-Go to **Actions**, select the workflow, click **Run workflow**, fill in the release tag(s), and select which apps to deploy.
+```bash
+git add .github/workflows/deploy-{app1}-{app2}.yml manifests/
+git commit -m "Add deployment workflow for {app1} & {app2}"
+git push
+```
+
+### 5. Trigger a Deployment
+
+Go to **Actions**, select your generated workflow, click **Run workflow**, fill in the release tag(s), and select which apps to deploy.
+
+## Pipeline Structure
+
+Each generated workflow has 4 jobs:
+
+1. **Validate & Prepare** - Authenticates to GitHub (or GHE), validates release tags exist in upstream repos, downloads release artifacts, copies CF manifests from this repo
+2. **Deploy to Nonprod** - Pushes apps to the nonprod CF foundation, records deployed versions
+3. **Notify Approval Required** - Creates a deployment notification via GitHub API. GitHub emails the configured environment reviewers
+4. **Deploy to Prod** - Gated by the `production` environment's required reviewers. Once approved, pushes apps to prod and records deployed versions
+
+### Workflow Inputs
+
+| Input | Description | Default |
+|-------|-------------|---------|
+| `{app1}_release_tag` | App 1 release tag (e.g., `v2.7.0`) | *required if deploying* |
+| `{app2}_release_tag` | App 2 release tag (e.g., `v1.0.0`) | *required if deploying* |
+| `deploy_{app1}` | Deploy App 1 | `true` |
+| `deploy_{app2}` | Deploy App 2 | `true` |
+
+Each app has its own release tag and can be deployed independently.
+
+## Environment Variables Injection
+
+To inject environment variables into a CF app before it starts (e.g., API keys), provide a JSON object when prompted for `CF_ENV_JSON` during setup:
+
+```json
+{"WEBSEARCH_API_KEY":"your-key-here","ANOTHER_VAR":"value"}
+```
+
+The workflow uses `cf push --no-start` + `cf set-env` + `cf start` to inject these before the app boots.
 
 ## Secrets Reference
 
-### Shared Secrets (used by both workflows)
+All secrets are configured automatically by the setup script. Secret names use app-specific prefixes derived from the app name (e.g., app name `fetch-t1` gets prefix `FETCH_T1_*`).
 
-#### GitHub Authentication
+### Shared Secrets
 
 | Secret | Required | Description |
 |--------|----------|-------------|
-| `GHE_HOST` | GHE only | GitHub Enterprise hostname (e.g., `github.mycompany.com`). Omit for github.com. |
+| `GHE_HOST` | GHE only | GitHub Enterprise hostname (e.g., `github.mycompany.com`). Omit for github.com |
 | `GHE_TOKEN` | Yes | Personal Access Token with `repo`, `read:org`, `workflow` scopes |
+| `CF_NONPROD_API` | Yes | Nonprod CF API endpoint |
+| `CF_NONPROD_USERNAME` | Yes | Nonprod CF service account username |
+| `CF_NONPROD_PASSWORD` | Yes | Nonprod CF service account password |
+| `CF_NONPROD_ORG` | Yes | Nonprod CF organization |
+| `CF_NONPROD_SPACE` | Yes | Nonprod CF space |
+| `CF_PROD_API` | Yes | Prod CF API endpoint |
+| `CF_PROD_USERNAME` | Yes | Prod CF service account username |
+| `CF_PROD_PASSWORD` | Yes | Prod CF service account password |
+| `CF_PROD_ORG` | Yes | Prod CF organization |
+| `CF_PROD_SPACE` | Yes | Prod CF space |
+| `APPROVAL_REVIEWERS` | Yes | Comma-separated GitHub usernames for deployment notifications |
 
-#### Cloud Foundry - Nonprod
-
-| Secret | Description |
-|--------|-------------|
-| `CF_NONPROD_API` | API endpoint (e.g., `https://api.sys.nonprod.example.com`) |
-| `CF_NONPROD_USERNAME` | Service account username |
-| `CF_NONPROD_PASSWORD` | Service account password |
-| `CF_NONPROD_ORG` | Organization name |
-| `CF_NONPROD_SPACE` | Space name |
-
-#### Cloud Foundry - Prod
-
-| Secret | Description |
-|--------|-------------|
-| `CF_PROD_API` | API endpoint (e.g., `https://api.sys.prod.example.com`) |
-| `CF_PROD_USERNAME` | Service account username |
-| `CF_PROD_PASSWORD` | Service account password |
-| `CF_PROD_ORG` | Organization name |
-| `CF_PROD_SPACE` | Space name |
-
-#### Notifications
+### Per-App Secrets (prefix = app name in UPPER_SNAKE_CASE)
 
 | Secret | Description |
 |--------|-------------|
-| `APPROVAL_REVIEWERS` | Comma-separated GitHub usernames for deployment notifications |
+| `{PREFIX}_UPSTREAM_REPO` | Upstream repo containing releases (`owner/repo`) |
+| `{PREFIX}_NAME` | Application base name used in CF push |
+| `{PREFIX}_MANIFEST_PATH` | Path to CF manifest in this repo |
+| `{PREFIX}_ARTIFACT_PATTERN` | Release asset glob (e.g., `fetch-mcp-*.jar`) |
+| `{PREFIX}_CF_ENV_JSON` | *(Optional)* JSON object of env vars to inject before app start |
 
-### App Group 1 Secrets (`multi-app-deploy.yml`)
+## Files
 
-| Secret | Description |
-|--------|-------------|
-| `APP_UPSTREAM_REPO` | Upstream repo containing releases (`owner/repo`) |
-| `APP1_NAME` | Application 1 base name used in CF push |
-| `APP1_MANIFEST_PATH` | Path to app1 manifest (default: `manifests/app1/manifest.yml`) |
-| `APP1_ARTIFACT_PATTERN` | Release asset glob, e.g. `my-api-{version}.jar` |
-| `APP2_NAME` | Application 2 base name used in CF push |
-| `APP2_MANIFEST_PATH` | Path to app2 manifest (default: `manifests/app2/manifest.yml`) |
-| `APP2_ARTIFACT_PATTERN` | Release asset glob, e.g. `my-worker-{version}.jar` |
+| File | Purpose |
+|------|---------|
+| `multi-app-setup-secrets.sh` | Interactive setup script - generates workflows and configures secrets |
+| `.github/workflows/multi-app-deploy.yml` | Template workflow (do not run directly) |
+| `.github/workflows/deploy-*.yml` | Generated workflows (created by setup script) |
+| `.multi-app-secrets-debug-*.txt` | Debug files with all secret values (gitignored) |
+| `manifests/` | CF manifest files for each application |
 
-### Fetch & Web Search MCP Servers (`fetch-websearch-deploy.yml`)
+## GHES Compatibility
 
-| Secret | Description |
-|--------|-------------|
-| `FETCH_MCP_UPSTREAM_REPO` | Fetch MCP source repo (e.g., `nkuhn-vmw/spring-fetch-mcp`) |
-| `FETCH_MCP_NAME` | Fetch MCP base name used in CF push |
-| `FETCH_MCP_MANIFEST_PATH` | Path to manifest (default: `manifests/fetch-mcp/manifest.yml`) |
-| `FETCH_MCP_ARTIFACT_PATTERN` | Release asset glob, e.g. `fetch-mcp-*.jar` |
-| `WEBSEARCH_MCP_UPSTREAM_REPO` | Web Search MCP source repo (e.g., `nkuhn-vmw/web-search-mcp`) |
-| `WEBSEARCH_MCP_NAME` | Web Search MCP base name used in CF push |
-| `WEBSEARCH_MCP_MANIFEST_PATH` | Path to manifest (default: `manifests/websearch-mcp/manifest.yml`) |
-| `WEBSEARCH_MCP_ARTIFACT_PATTERN` | Release asset glob, e.g. `web-search-mcp-*.jar` |
+Tested with GitHub Enterprise Server 3.14+. The workflows use `actions/upload-artifact@v3-node20` and `actions/download-artifact@v3-node20` for GHES compatibility (v4 artifact actions are not supported on GHES).
+
+Self-hosted runners must have `gh` CLI >= 2.0 and `jq` installed.
