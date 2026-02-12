@@ -173,6 +173,7 @@ APP_MANIFEST_PATHS=()
 APP_ARTIFACT_PATTERNS=()
 APP_CF_ENV_JSONS=()
 
+RUNNER=""
 WORKFLOW_SLUG=""
 DISPLAY_NAME=""
 GENERATED_WORKFLOW=""
@@ -283,12 +284,12 @@ EOF
 }
 
 emit_validate_job() {
-    cat <<'EOF'
+    cat <<EOF
   # ──────────────────────────────────────────────────────────────
   # Job 1: Validate releases and prepare artifacts
   # ──────────────────────────────────────────────────────────────
   validate-and-prepare:
-    runs-on: ubuntu-latest
+    runs-on: ${RUNNER}
     outputs:
 EOF
     for i in $(seq 0 $((NUM_APPS - 1))); do
@@ -440,18 +441,18 @@ emit_deploy_job() {
 
     echo ""
     if [ "$env_name" = "nonprod" ]; then
-        cat <<'EOF'
+        cat <<EOF
   # ──────────────────────────────────────────────────────────────
   # Job 2: Deploy apps to Non-Production
   # ──────────────────────────────────────────────────────────────
   deploy-nonprod:
     needs: validate-and-prepare
-    runs-on: ubuntu-latest
+    runs-on: ${RUNNER}
     steps:
       - uses: actions/checkout@v4
 EOF
     else
-        cat <<'EOF'
+        cat <<EOF
   # ──────────────────────────────────────────────────────────────
   # Job 4: Deploy apps to Production
   #
@@ -467,7 +468,7 @@ EOF
   # ──────────────────────────────────────────────────────────────
   deploy-prod:
     needs: [validate-and-prepare, deploy-nonprod]
-    runs-on: ubuntu-latest
+    runs-on: ${RUNNER}
     environment: production
     steps:
       - uses: actions/checkout@v4
@@ -633,7 +634,7 @@ EOF
 }
 
 emit_notify_job() {
-    cat <<'EOF'
+    cat <<EOF
 
   # ──────────────────────────────────────────────────────────────
   # Job 3: Send approval notification
@@ -645,7 +646,7 @@ emit_notify_job() {
   # ──────────────────────────────────────────────────────────────
   notify-approval-required:
     needs: [validate-and-prepare, deploy-nonprod]
-    runs-on: ubuntu-latest
+    runs-on: ${RUNNER}
     steps:
 EOF
     emit_gh_auth_step
@@ -749,6 +750,7 @@ save_debug_file() {
         echo "# Platform: ${GITHUB_PLATFORM}"
         echo "# Shared secrets configured: ${CONFIGURE_SHARED}"
         echo "# Workflow file: ${GENERATED_WORKFLOW}"
+        echo "# Runner: ${RUNNER}"
         echo ""
         echo "# Secret name prefixes:"
         for i in $(seq 0 $((NUM_APPS - 1))); do
@@ -879,6 +881,15 @@ main() {
         exit 1
     fi
 
+    # Ask for runner label
+    echo ""
+    echo -e "${BOLD}GitHub Actions runner label${NC}"
+    echo -e "  ${DIM}Use 'ubuntu-latest' for github.com hosted runners,${NC}"
+    echo -e "  ${DIM}or specify your self-hosted runner label (e.g., 'self-hosted', 'my-runner').${NC}"
+    echo ""
+    prompt_value "Runner" "ubuntu-latest"
+    RUNNER="$REPLY"
+
     show_requirements
 
     print_header "Enter Secret Values"
@@ -967,6 +978,9 @@ main() {
     echo ""
     echo -e "${BOLD}Workflow to generate:${NC}"
     echo -e "  ${CYAN}${GENERATED_WORKFLOW}${NC}"
+    echo ""
+    echo -e "${BOLD}Runner:${NC}"
+    echo -e "  ${CYAN}${RUNNER}${NC}"
     echo ""
 
     if [ "$CONFIGURE_SHARED" = "true" ]; then

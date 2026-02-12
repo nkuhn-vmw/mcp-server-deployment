@@ -26,14 +26,15 @@ The interactive script will prompt for:
 1. **Platform** — github.com or GitHub Enterprise Server
 2. **Shared vs app-only secrets** — first run configures everything; subsequent runs can skip shared secrets
 3. **Number of apps** — how many applications in this deployment group (1–10)
-4. **Per-app details** — for each app:
+4. **Runner** — GitHub Actions runner label (default: `ubuntu-latest`; use your self-hosted runner label for GHES)
+5. **Per-app details** — for each app:
    - **Name** — CF app base name (e.g., `fetch-t1`)
    - **Upstream repo** — GitHub repo containing releases (e.g., `org/my-api`)
    - **Manifest path** — path to the CF manifest in this repo (e.g., `manifests/fetch-mcp/manifest.yml`)
    - **Artifact pattern** — release asset glob (e.g., `fetch-mcp-*.jar`)
    - **CF env vars** *(optional)* — JSON object of environment variables to inject before app start
-5. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
-6. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
+6. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
+7. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
 
 The script generates:
 - A workflow at `.github/workflows/deploy-{app1}-{app2}-...{appN}.yml`
