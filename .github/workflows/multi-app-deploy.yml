@@ -1,3 +1,8 @@
+# ============================================================================
+# TEMPLATE — Do not run this workflow directly.
+# Use multi-app-setup-secrets.sh to generate a concrete workflow with
+# app-specific names and secrets for each pair of applications.
+# ============================================================================
 name: Deploy MCP App Group 1 to Cloud Foundry
 
 # On-demand only — manually triggered from the Actions tab
