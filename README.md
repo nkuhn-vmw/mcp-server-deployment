@@ -4,33 +4,44 @@ Deploy MCP server applications to Cloud Foundry with a nonprod/prod pipeline and
 
 ## How It Works
 
-This repo uses a **generator-based** approach. The setup script programmatically generates deployment workflow YAML for any number of applications (1, 2, 3, or more). You run the setup script once per app group to:
+The setup script (`multi-app-setup-secrets.sh`) programmatically generates a GitHub Actions deployment workflow for any number of applications (1, 2, 3, or more). Each run of the script:
 
-1. Generate an app-specific workflow YAML (e.g., `deploy-fetch-t1-web-t1.yml`)
-2. Configure all required GitHub secrets with app-specific prefixes
-3. Save a debug file with all configured values for troubleshooting
+1. Prompts for application details (name, upstream repo, artifact pattern, etc.)
+2. Generates a workflow YAML file under `.github/workflows/`
+3. Configures all required GitHub secrets with app-specific prefixes
+4. Saves an unmasked debug file for troubleshooting
 
-You can run the setup script multiple times to create workflows for many different app groups, all sharing the same CF credentials and approval gate.
+You can run the script multiple times to create separate workflows for different app groups. All workflows share the same CF credentials and production approval gate.
 
 ## Quick Start
 
-### 1. Generate a Workflow and Configure Secrets
+### 1. Run the Setup Script
 
 ```bash
 ./multi-app-setup-secrets.sh
 ```
 
 The interactive script will prompt for:
-- **Platform** - github.com or GitHub Enterprise Server
-- **Shared secrets** (first run) - GitHub PAT, CF credentials (nonprod + prod), approval reviewers
-- **Number of apps** - How many applications in this deployment group (1-10)
-- **Per-app details** - Name, upstream repo, manifest path, artifact pattern, optional env vars
 
-The script generates a workflow at `.github/workflows/deploy-{app1}-{app2}-...yml` and a debug file at `.multi-app-secrets-debug-{slug}.txt`.
+1. **Platform** — github.com or GitHub Enterprise Server
+2. **Shared vs app-only secrets** — first run configures everything; subsequent runs can skip shared secrets
+3. **Number of apps** — how many applications in this deployment group (1–10)
+4. **Per-app details** — for each app:
+   - **Name** — CF app base name (e.g., `fetch-t1`)
+   - **Upstream repo** — GitHub repo containing releases (e.g., `org/my-api`)
+   - **Manifest path** — path to the CF manifest in this repo (e.g., `manifests/fetch-mcp/manifest.yml`)
+   - **Artifact pattern** — release asset glob (e.g., `fetch-mcp-*.jar`)
+   - **CF env vars** *(optional)* — JSON object of environment variables to inject before app start
+5. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
+6. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
+
+The script generates:
+- A workflow at `.github/workflows/deploy-{app1}-{app2}-...{appN}.yml`
+- A debug file at `.multi-app-secrets-debug-{app1}-{app2}-...{appN}.txt` (gitignored)
 
 ### 2. Add CF Manifests
 
-Create manifest files for each application. Paths are configurable via the setup script:
+Create manifest files for each application. Paths are configurable during setup:
 
 ```
 manifests/
@@ -44,13 +55,13 @@ manifests/
 
 1. Go to **Settings > Environments > New environment** and create an environment named `production`
 2. Enable **Required reviewers** and add the users/teams who should approve production deployments
-3. GitHub will email those reviewers when any workflow reaches the prod deployment step
+3. GitHub will automatically email those reviewers when any workflow reaches the prod deployment step
 
 ### 4. Commit and Push
 
 ```bash
-git add .github/workflows/deploy-{app1}-{app2}.yml manifests/
-git commit -m "Add deployment workflow for {app1} & {app2}"
+git add .github/workflows/deploy-*.yml manifests/
+git commit -m "Add deployment workflow"
 git push
 ```
 
@@ -62,10 +73,10 @@ Go to **Actions**, select your generated workflow, click **Run workflow**, fill 
 
 Each generated workflow has 4 jobs:
 
-1. **Validate & Prepare** - Authenticates to GitHub (or GHE), validates release tags exist in upstream repos, downloads release artifacts, copies CF manifests from this repo
-2. **Deploy to Nonprod** - Pushes apps to the nonprod CF foundation, records deployed versions
-3. **Notify Approval Required** - Creates a deployment notification via GitHub API. GitHub emails the configured environment reviewers
-4. **Deploy to Prod** - Gated by the `production` environment's required reviewers. Once approved, pushes apps to prod and records deployed versions
+1. **Validate & Prepare** — Authenticates to GitHub (or GHE), validates that the specified release tags exist in the upstream repos
+2. **Deploy to Nonprod** — Downloads release artifacts, pushes apps to the nonprod CF foundation, records deployed versions in git
+3. **Notify Approval Required** — Creates a deployment notification via the GitHub API for broader visibility
+4. **Deploy to Prod** — Gated by the `production` environment's required reviewers. Once approved, downloads release artifacts, pushes apps to prod, and records deployed versions
 
 ### Workflow Inputs
 
@@ -73,10 +84,14 @@ Each app in the group gets two inputs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `{app}_release_tag` | Release tag for the app (e.g., `v2.7.0`) | *required if deploying* |
+| `{app}_release_tag` | Release tag (e.g., `v2.7.0`) | *required if deploying* |
 | `deploy_{app}` | Whether to deploy this app | `true` |
 
-Each app has its own release tag and can be deployed independently.
+Apps can be deployed independently — set `deploy_{app}` to `false` to skip an app.
+
+### Version Tracking
+
+After each deployment, the workflow commits a `.last-deployed-{app}-{env}` file recording the deployed release tag. This provides an audit trail directly in the repo.
 
 ## Environment Variables Injection
 
@@ -86,11 +101,11 @@ To inject environment variables into a CF app before it starts (e.g., API keys),
 {"WEBSEARCH_API_KEY":"your-key-here","ANOTHER_VAR":"value"}
 ```
 
-The workflow uses `cf push --no-start` + `cf set-env` + `cf start` to inject these before the app boots.
+The workflow uses `cf push --no-start` + `cf set-env` + `cf start` to inject these before the app boots. If no env vars are needed, leave the prompt empty and the workflow will use a simple `cf push`.
 
 ## Secrets Reference
 
-All secrets are configured automatically by the setup script. Secret names use app-specific prefixes derived from the app name (e.g., app name `fetch-t1` gets prefix `FETCH_T1_*`).
+All secrets are configured automatically by the setup script. Secret names use app-specific prefixes derived from the app name (e.g., app name `fetch-t1` → prefix `FETCH_T1_*`).
 
 ### Shared Secrets
 
@@ -124,13 +139,18 @@ All secrets are configured automatically by the setup script. Secret names use a
 
 | File | Purpose |
 |------|---------|
-| `multi-app-setup-secrets.sh` | Interactive setup script - generates workflows and configures secrets |
-| `.github/workflows/deploy-*.yml` | Generated workflows (created by setup script) |
-| `.multi-app-secrets-debug-*.txt` | Debug files with all secret values (gitignored) |
+| `multi-app-setup-secrets.sh` | Interactive setup script — generates workflows and configures secrets |
+| `.github/workflows/deploy-*.yml` | Generated deployment workflows (created by setup script) |
+| `.github/workflows/fetch-websearch-deploy.yml` | Legacy standalone workflow for fetch + websearch MCP servers |
+| `setup-secrets-fetch-websearch.sh` | Legacy setup script for the standalone workflow |
+| `.multi-app-secrets-debug-*.txt` | Debug files with unmasked secret values (gitignored) |
 | `manifests/` | CF manifest files for each application |
+| `.gitignore` | Excludes debug files from version control |
 
 ## GHES Compatibility
 
-Tested with GitHub Enterprise Server 3.14+. The workflows download release assets directly via `gh release download` (no artifact actions required).
+Tested with GitHub Enterprise Server 3.14+. The workflows download release assets directly via `gh release download` — no artifact actions required, avoiding the v3/v4 compatibility issues on GHES.
+
+The `GH_HOST` environment variable is only set when `GHE_HOST` is non-empty, which avoids the `gh` CLI bug where an empty `GH_HOST=""` causes authentication failures.
 
 Self-hosted runners must have `gh` CLI >= 2.0 and `jq` installed.
