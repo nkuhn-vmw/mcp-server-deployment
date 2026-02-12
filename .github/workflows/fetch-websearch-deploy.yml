@@ -137,93 +137,6 @@ jobs:
           echo "deploy_fetch=${DEPLOY_FETCH}" >> "$GITHUB_OUTPUT"
           echo "deploy_websearch=${DEPLOY_WEBSEARCH}" >> "$GITHUB_OUTPUT"
 
-      - name: Download Fetch MCP release assets
-        if: inputs.deploy_fetch
-        env:
-          _GHE_HOST: ${{ secrets.GHE_HOST }}
-          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.FETCH_MCP_UPSTREAM_REPO }}
-          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
-        run: |
-          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
-          VERSION_DOTTED="${{ steps.validate.outputs.fetch_version_dotted }}"
-
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading Fetch MCP artifact matching: ${PATTERN}"
-
-          mkdir -p ./artifacts/fetch
-          gh release download "${{ inputs.fetch_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./artifacts/fetch
-
-          echo "Fetch MCP artifacts downloaded:"
-          ls -la ./artifacts/fetch/
-
-      - name: Download Web Search MCP release assets
-        if: inputs.deploy_websearch
-        env:
-          _GHE_HOST: ${{ secrets.GHE_HOST }}
-          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.WEBSEARCH_MCP_UPSTREAM_REPO }}
-          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
-        run: |
-          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
-          VERSION_DOTTED="${{ steps.validate.outputs.websearch_version_dotted }}"
-
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading Web Search MCP artifact matching: ${PATTERN}"
-
-          mkdir -p ./artifacts/websearch
-          gh release download "${{ inputs.websearch_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./artifacts/websearch
-
-          echo "Web Search MCP artifacts downloaded:"
-          ls -la ./artifacts/websearch/
-
-      - name: Copy manifest files from repo
-        env:
-          FETCH_MANIFEST: ${{ secrets.FETCH_MCP_MANIFEST_PATH }}
-          WEBSEARCH_MANIFEST: ${{ secrets.WEBSEARCH_MCP_MANIFEST_PATH }}
-        run: |
-          if [ "${{ inputs.deploy_fetch }}" = "true" ]; then
-            MANIFEST_PATH="${FETCH_MANIFEST:-manifests/fetch-mcp/manifest.yml}"
-            if [ ! -f "$MANIFEST_PATH" ]; then
-              echo "Error: Fetch MCP manifest not found at ${MANIFEST_PATH}"
-              exit 1
-            fi
-            cp "$MANIFEST_PATH" ./artifacts/fetch/manifest.yml
-            echo "Fetch MCP manifest copied from: ${MANIFEST_PATH}"
-          fi
-
-          if [ "${{ inputs.deploy_websearch }}" = "true" ]; then
-            MANIFEST_PATH="${WEBSEARCH_MANIFEST:-manifests/websearch-mcp/manifest.yml}"
-            if [ ! -f "$MANIFEST_PATH" ]; then
-              echo "Error: Web Search MCP manifest not found at ${MANIFEST_PATH}"
-              exit 1
-            fi
-            cp "$MANIFEST_PATH" ./artifacts/websearch/manifest.yml
-            echo "Web Search MCP manifest copied from: ${MANIFEST_PATH}"
-          fi
-
-      - name: Upload Fetch MCP artifacts
-        if: inputs.deploy_fetch
-        uses: actions/upload-artifact@v3-node20
-        with:
-          name: fetch-mcp-release-assets
-          path: ./artifacts/fetch/
-          retention-days: 1
-
-      - name: Upload Web Search MCP artifacts
-        if: inputs.deploy_websearch
-        uses: actions/upload-artifact@v3-node20
-        with:
-          name: websearch-mcp-release-assets
-          path: ./artifacts/websearch/
-          retention-days: 1
-
   # ──────────────────────────────────────────────────────────────
   # Job 2: Deploy both servers to Non-Production
   # ──────────────────────────────────────────────────────────────
@@ -251,12 +164,46 @@ jobs:
           ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
           echo "Authenticated to Nonprod CF: ${CF_API}"
 
-      - name: Download Fetch MCP artifacts
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
+
+      - name: Download Fetch MCP release assets
         if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: fetch-mcp-release-assets
-          path: ./fetch
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.FETCH_MCP_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
+          FETCH_MANIFEST: ${{ secrets.FETCH_MCP_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.fetch_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading Fetch MCP artifact matching: ${PATTERN}"
+
+          mkdir -p ./fetch
+          gh release download "${{ needs.validate-and-prepare.outputs.fetch_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./fetch
+
+          MANIFEST_PATH="${FETCH_MANIFEST:-manifests/fetch-mcp/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: Fetch MCP manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./fetch/manifest.yml
+          echo "Fetch MCP release assets and manifest ready:"
+          ls -la ./fetch/
 
       - name: Deploy Fetch MCP to Nonprod
         if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
@@ -275,12 +222,35 @@ jobs:
 
           echo "Fetch MCP deployed to nonprod: ${DEPLOY_NAME}"
 
-      - name: Download Web Search MCP artifacts
+      - name: Download Web Search MCP release assets
         if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: websearch-mcp-release-assets
-          path: ./websearch
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.WEBSEARCH_MCP_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
+          WEBSEARCH_MANIFEST: ${{ secrets.WEBSEARCH_MCP_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.websearch_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading Web Search MCP artifact matching: ${PATTERN}"
+
+          mkdir -p ./websearch
+          gh release download "${{ needs.validate-and-prepare.outputs.websearch_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./websearch
+
+          MANIFEST_PATH="${WEBSEARCH_MANIFEST:-manifests/websearch-mcp/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: Web Search MCP manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./websearch/manifest.yml
+          echo "Web Search MCP release assets and manifest ready:"
+          ls -la ./websearch/
 
       - name: Deploy Web Search MCP to Nonprod
         if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
@@ -472,12 +442,46 @@ jobs:
           ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
           echo "Authenticated to Prod CF: ${CF_API}"
 
-      - name: Download Fetch MCP artifacts
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
+
+      - name: Download Fetch MCP release assets
         if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: fetch-mcp-release-assets
-          path: ./fetch
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.FETCH_MCP_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.FETCH_MCP_ARTIFACT_PATTERN }}
+          FETCH_MANIFEST: ${{ secrets.FETCH_MCP_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.fetch_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading Fetch MCP artifact matching: ${PATTERN}"
+
+          mkdir -p ./fetch
+          gh release download "${{ needs.validate-and-prepare.outputs.fetch_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./fetch
+
+          MANIFEST_PATH="${FETCH_MANIFEST:-manifests/fetch-mcp/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: Fetch MCP manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./fetch/manifest.yml
+          echo "Fetch MCP release assets and manifest ready:"
+          ls -la ./fetch/
 
       - name: Deploy Fetch MCP to Prod
         if: needs.validate-and-prepare.outputs.deploy_fetch == 'true'
@@ -496,12 +500,35 @@ jobs:
 
           echo "Fetch MCP deployed to prod: ${DEPLOY_NAME}"
 
-      - name: Download Web Search MCP artifacts
+      - name: Download Web Search MCP release assets
         if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: websearch-mcp-release-assets
-          path: ./websearch
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.WEBSEARCH_MCP_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.WEBSEARCH_MCP_ARTIFACT_PATTERN }}
+          WEBSEARCH_MANIFEST: ${{ secrets.WEBSEARCH_MCP_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.websearch_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading Web Search MCP artifact matching: ${PATTERN}"
+
+          mkdir -p ./websearch
+          gh release download "${{ needs.validate-and-prepare.outputs.websearch_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./websearch
+
+          MANIFEST_PATH="${WEBSEARCH_MANIFEST:-manifests/websearch-mcp/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: Web Search MCP manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./websearch/manifest.yml
+          echo "Web Search MCP release assets and manifest ready:"
+          ls -la ./websearch/
 
       - name: Deploy Web Search MCP to Prod
         if: needs.validate-and-prepare.outputs.deploy_websearch == 'true'

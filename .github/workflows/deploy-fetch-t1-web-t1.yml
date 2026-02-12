@@ -163,93 +163,6 @@ jobs:
           echo "deploy_fetch_t1=${DEPLOY_FETCH_T1}" >> "$GITHUB_OUTPUT"
           echo "deploy_web_t1=${DEPLOY_WEB_T1}" >> "$GITHUB_OUTPUT"
 
-      - name: Download fetch-t1 release assets
-        if: inputs.deploy_fetch_t1
-        env:
-          _GHE_HOST: ${{ secrets.GHE_HOST }}
-          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.FETCH_T1_UPSTREAM_REPO }}
-          ARTIFACT_PATTERN: ${{ secrets.FETCH_T1_ARTIFACT_PATTERN }}
-        run: |
-          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
-          VERSION_DOTTED="${{ steps.validate.outputs.fetch_t1_version_dotted }}"
-
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading fetch-t1 artifact matching: ${PATTERN}"
-
-          mkdir -p ./artifacts/fetch_t1
-          gh release download "${{ inputs.fetch_t1_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./artifacts/fetch_t1
-
-          echo "fetch-t1 artifacts downloaded:"
-          ls -la ./artifacts/fetch_t1/
-
-      - name: Download web-t1 release assets
-        if: inputs.deploy_web_t1
-        env:
-          _GHE_HOST: ${{ secrets.GHE_HOST }}
-          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.WEB_T1_UPSTREAM_REPO }}
-          ARTIFACT_PATTERN: ${{ secrets.WEB_T1_ARTIFACT_PATTERN }}
-        run: |
-          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
-          VERSION_DOTTED="${{ steps.validate.outputs.web_t1_version_dotted }}"
-
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading web-t1 artifact matching: ${PATTERN}"
-
-          mkdir -p ./artifacts/web_t1
-          gh release download "${{ inputs.web_t1_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./artifacts/web_t1
-
-          echo "web-t1 artifacts downloaded:"
-          ls -la ./artifacts/web_t1/
-
-      - name: Copy manifest files from repo
-        env:
-          FETCH_T1_MANIFEST: ${{ secrets.FETCH_T1_MANIFEST_PATH }}
-          WEB_T1_MANIFEST: ${{ secrets.WEB_T1_MANIFEST_PATH }}
-        run: |
-          if [ "${{ inputs.deploy_fetch_t1 }}" = "true" ]; then
-            MANIFEST_PATH="${FETCH_T1_MANIFEST:-manifests/fetch_t1/manifest.yml}"
-            if [ ! -f "$MANIFEST_PATH" ]; then
-              echo "Error: fetch-t1 manifest not found at ${MANIFEST_PATH}"
-              exit 1
-            fi
-            cp "$MANIFEST_PATH" ./artifacts/fetch_t1/manifest.yml
-            echo "fetch-t1 manifest copied from: ${MANIFEST_PATH}"
-          fi
-
-          if [ "${{ inputs.deploy_web_t1 }}" = "true" ]; then
-            MANIFEST_PATH="${WEB_T1_MANIFEST:-manifests/web_t1/manifest.yml}"
-            if [ ! -f "$MANIFEST_PATH" ]; then
-              echo "Error: web-t1 manifest not found at ${MANIFEST_PATH}"
-              exit 1
-            fi
-            cp "$MANIFEST_PATH" ./artifacts/web_t1/manifest.yml
-            echo "web-t1 manifest copied from: ${MANIFEST_PATH}"
-          fi
-
-      - name: Upload fetch-t1 artifacts
-        if: inputs.deploy_fetch_t1
-        uses: actions/upload-artifact@v3-node20
-        with:
-          name: fetch_t1-release-assets
-          path: ./artifacts/fetch_t1/
-          retention-days: 1
-
-      - name: Upload web-t1 artifacts
-        if: inputs.deploy_web_t1
-        uses: actions/upload-artifact@v3-node20
-        with:
-          name: web_t1-release-assets
-          path: ./artifacts/web_t1/
-          retention-days: 1
-
   # ──────────────────────────────────────────────────────────────
   # Job 2: Deploy both apps to Non-Production
   # ──────────────────────────────────────────────────────────────
@@ -277,12 +190,46 @@ jobs:
           ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
           echo "Authenticated to Nonprod CF: ${CF_API}"
 
-      - name: Download fetch-t1 artifacts
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
+
+      - name: Download fetch-t1 release assets
         if: needs.validate-and-prepare.outputs.deploy_fetch_t1 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: fetch_t1-release-assets
-          path: ./fetch_t1
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.FETCH_T1_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.FETCH_T1_ARTIFACT_PATTERN }}
+          FETCH_T1_MANIFEST: ${{ secrets.FETCH_T1_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.fetch_t1_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading fetch-t1 artifact matching: ${PATTERN}"
+
+          mkdir -p ./fetch_t1
+          gh release download "${{ needs.validate-and-prepare.outputs.fetch_t1_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./fetch_t1
+
+          MANIFEST_PATH="${FETCH_T1_MANIFEST:-manifests/fetch_t1/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: fetch-t1 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./fetch_t1/manifest.yml
+          echo "fetch-t1 release assets and manifest ready:"
+          ls -la ./fetch_t1/
 
       - name: Deploy fetch-t1 to Nonprod
         if: needs.validate-and-prepare.outputs.deploy_fetch_t1 == 'true'
@@ -318,12 +265,35 @@ jobs:
 
           echo "fetch-t1 deployed to nonprod: ${DEPLOY_NAME}"
 
-      - name: Download web-t1 artifacts
+      - name: Download web-t1 release assets
         if: needs.validate-and-prepare.outputs.deploy_web_t1 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: web_t1-release-assets
-          path: ./web_t1
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.WEB_T1_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.WEB_T1_ARTIFACT_PATTERN }}
+          WEB_T1_MANIFEST: ${{ secrets.WEB_T1_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.web_t1_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading web-t1 artifact matching: ${PATTERN}"
+
+          mkdir -p ./web_t1
+          gh release download "${{ needs.validate-and-prepare.outputs.web_t1_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./web_t1
+
+          MANIFEST_PATH="${WEB_T1_MANIFEST:-manifests/web_t1/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: web-t1 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./web_t1/manifest.yml
+          echo "web-t1 release assets and manifest ready:"
+          ls -la ./web_t1/
 
       - name: Deploy web-t1 to Nonprod
         if: needs.validate-and-prepare.outputs.deploy_web_t1 == 'true'
@@ -527,12 +497,46 @@ jobs:
           ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
           echo "Authenticated to Prod CF: ${CF_API}"
 
-      - name: Download fetch-t1 artifacts
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
+
+      - name: Download fetch-t1 release assets
         if: needs.validate-and-prepare.outputs.deploy_fetch_t1 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: fetch_t1-release-assets
-          path: ./fetch_t1
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.FETCH_T1_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.FETCH_T1_ARTIFACT_PATTERN }}
+          FETCH_T1_MANIFEST: ${{ secrets.FETCH_T1_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.fetch_t1_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading fetch-t1 artifact matching: ${PATTERN}"
+
+          mkdir -p ./fetch_t1
+          gh release download "${{ needs.validate-and-prepare.outputs.fetch_t1_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./fetch_t1
+
+          MANIFEST_PATH="${FETCH_T1_MANIFEST:-manifests/fetch_t1/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: fetch-t1 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./fetch_t1/manifest.yml
+          echo "fetch-t1 release assets and manifest ready:"
+          ls -la ./fetch_t1/
 
       - name: Deploy fetch-t1 to Prod
         if: needs.validate-and-prepare.outputs.deploy_fetch_t1 == 'true'
@@ -568,12 +572,35 @@ jobs:
 
           echo "fetch-t1 deployed to prod: ${DEPLOY_NAME}"
 
-      - name: Download web-t1 artifacts
+      - name: Download web-t1 release assets
         if: needs.validate-and-prepare.outputs.deploy_web_t1 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: web_t1-release-assets
-          path: ./web_t1
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.WEB_T1_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.WEB_T1_ARTIFACT_PATTERN }}
+          WEB_T1_MANIFEST: ${{ secrets.WEB_T1_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.web_t1_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading web-t1 artifact matching: ${PATTERN}"
+
+          mkdir -p ./web_t1
+          gh release download "${{ needs.validate-and-prepare.outputs.web_t1_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./web_t1
+
+          MANIFEST_PATH="${WEB_T1_MANIFEST:-manifests/web_t1/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: web-t1 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./web_t1/manifest.yml
+          echo "web-t1 release assets and manifest ready:"
+          ls -la ./web_t1/
 
       - name: Deploy web-t1 to Prod
         if: needs.validate-and-prepare.outputs.deploy_web_t1 == 'true'

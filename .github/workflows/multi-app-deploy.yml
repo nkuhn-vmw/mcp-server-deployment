@@ -163,93 +163,6 @@ jobs:
           echo "deploy_app1=${DEPLOY_APP1}" >> "$GITHUB_OUTPUT"
           echo "deploy_app2=${DEPLOY_APP2}" >> "$GITHUB_OUTPUT"
 
-      - name: Download App 1 release assets
-        if: inputs.deploy_app1
-        env:
-          _GHE_HOST: ${{ secrets.GHE_HOST }}
-          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
-          ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
-        run: |
-          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
-          VERSION_DOTTED="${{ steps.validate.outputs.app1_version_dotted }}"
-
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading App 1 artifact matching: ${PATTERN}"
-
-          mkdir -p ./artifacts/app1
-          gh release download "${{ inputs.app1_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./artifacts/app1
-
-          echo "App 1 artifacts downloaded:"
-          ls -la ./artifacts/app1/
-
-      - name: Download App 2 release assets
-        if: inputs.deploy_app2
-        env:
-          _GHE_HOST: ${{ secrets.GHE_HOST }}
-          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
-          UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
-          ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
-        run: |
-          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
-          VERSION_DOTTED="${{ steps.validate.outputs.app2_version_dotted }}"
-
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading App 2 artifact matching: ${PATTERN}"
-
-          mkdir -p ./artifacts/app2
-          gh release download "${{ inputs.app2_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./artifacts/app2
-
-          echo "App 2 artifacts downloaded:"
-          ls -la ./artifacts/app2/
-
-      - name: Copy manifest files from repo
-        env:
-          APP1_MANIFEST: ${{ secrets.APP1_MANIFEST_PATH }}
-          APP2_MANIFEST: ${{ secrets.APP2_MANIFEST_PATH }}
-        run: |
-          if [ "${{ inputs.deploy_app1 }}" = "true" ]; then
-            MANIFEST_PATH="${APP1_MANIFEST:-manifests/app1/manifest.yml}"
-            if [ ! -f "$MANIFEST_PATH" ]; then
-              echo "Error: App 1 manifest not found at ${MANIFEST_PATH}"
-              exit 1
-            fi
-            cp "$MANIFEST_PATH" ./artifacts/app1/manifest.yml
-            echo "App 1 manifest copied from: ${MANIFEST_PATH}"
-          fi
-
-          if [ "${{ inputs.deploy_app2 }}" = "true" ]; then
-            MANIFEST_PATH="${APP2_MANIFEST:-manifests/app2/manifest.yml}"
-            if [ ! -f "$MANIFEST_PATH" ]; then
-              echo "Error: App 2 manifest not found at ${MANIFEST_PATH}"
-              exit 1
-            fi
-            cp "$MANIFEST_PATH" ./artifacts/app2/manifest.yml
-            echo "App 2 manifest copied from: ${MANIFEST_PATH}"
-          fi
-
-      - name: Upload App 1 artifacts
-        if: inputs.deploy_app1
-        uses: actions/upload-artifact@v3-node20
-        with:
-          name: app1-release-assets
-          path: ./artifacts/app1/
-          retention-days: 1
-
-      - name: Upload App 2 artifacts
-        if: inputs.deploy_app2
-        uses: actions/upload-artifact@v3-node20
-        with:
-          name: app2-release-assets
-          path: ./artifacts/app2/
-          retention-days: 1
-
   # ──────────────────────────────────────────────────────────────
   # Job 2: Deploy both apps to Non-Production
   # ──────────────────────────────────────────────────────────────
@@ -277,12 +190,46 @@ jobs:
           ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
           echo "Authenticated to Nonprod CF: ${CF_API}"
 
-      - name: Download App 1 artifacts
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
+
+      - name: Download App 1 release assets
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: app1-release-assets
-          path: ./app1
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
+          APP1_MANIFEST: ${{ secrets.APP1_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.app1_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading App 1 artifact matching: ${PATTERN}"
+
+          mkdir -p ./app1
+          gh release download "${{ needs.validate-and-prepare.outputs.app1_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./app1
+
+          MANIFEST_PATH="${APP1_MANIFEST:-manifests/app1/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: App 1 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./app1/manifest.yml
+          echo "App 1 release assets and manifest ready:"
+          ls -la ./app1/
 
       - name: Deploy App 1 to Nonprod
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
@@ -318,12 +265,35 @@ jobs:
 
           echo "App 1 deployed to nonprod: ${DEPLOY_NAME}"
 
-      - name: Download App 2 artifacts
+      - name: Download App 2 release assets
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: app2-release-assets
-          path: ./app2
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
+          APP2_MANIFEST: ${{ secrets.APP2_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.app2_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading App 2 artifact matching: ${PATTERN}"
+
+          mkdir -p ./app2
+          gh release download "${{ needs.validate-and-prepare.outputs.app2_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./app2
+
+          MANIFEST_PATH="${APP2_MANIFEST:-manifests/app2/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: App 2 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./app2/manifest.yml
+          echo "App 2 release assets and manifest ready:"
+          ls -la ./app2/
 
       - name: Deploy App 2 to Nonprod
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
@@ -527,12 +497,46 @@ jobs:
           ./cf8 target -o "$CF_ORG" -s "$CF_SPACE"
           echo "Authenticated to Prod CF: ${CF_API}"
 
-      - name: Download App 1 artifacts
+      - name: Configure GitHub Authentication
+        env:
+          GHE_TOKEN: ${{ secrets.GHE_TOKEN }}
+          GHE_HOST: ${{ secrets.GHE_HOST }}
+        run: |
+          if [ -n "$GHE_HOST" ]; then
+            echo "${GHE_TOKEN}" | gh auth login --hostname "${GHE_HOST}" --with-token
+          else
+            echo "${GHE_TOKEN}" | gh auth login --with-token
+          fi
+
+      - name: Download App 1 release assets
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: app1-release-assets
-          path: ./app1
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.APP1_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.APP1_ARTIFACT_PATTERN }}
+          APP1_MANIFEST: ${{ secrets.APP1_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.app1_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading App 1 artifact matching: ${PATTERN}"
+
+          mkdir -p ./app1
+          gh release download "${{ needs.validate-and-prepare.outputs.app1_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./app1
+
+          MANIFEST_PATH="${APP1_MANIFEST:-manifests/app1/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: App 1 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./app1/manifest.yml
+          echo "App 1 release assets and manifest ready:"
+          ls -la ./app1/
 
       - name: Deploy App 1 to Prod
         if: needs.validate-and-prepare.outputs.deploy_app1 == 'true'
@@ -568,12 +572,35 @@ jobs:
 
           echo "App 1 deployed to prod: ${DEPLOY_NAME}"
 
-      - name: Download App 2 artifacts
+      - name: Download App 2 release assets
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
-        uses: actions/download-artifact@v3-node20
-        with:
-          name: app2-release-assets
-          path: ./app2
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.APP2_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.APP2_ARTIFACT_PATTERN }}
+          APP2_MANIFEST: ${{ secrets.APP2_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.app2_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading App 2 artifact matching: ${PATTERN}"
+
+          mkdir -p ./app2
+          gh release download "${{ needs.validate-and-prepare.outputs.app2_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./app2
+
+          MANIFEST_PATH="${APP2_MANIFEST:-manifests/app2/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: App 2 manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./app2/manifest.yml
+          echo "App 2 release assets and manifest ready:"
+          ls -la ./app2/
 
       - name: Deploy App 2 to Prod
         if: needs.validate-and-prepare.outputs.deploy_app2 == 'true'
