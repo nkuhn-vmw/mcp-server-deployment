@@ -96,8 +96,13 @@ set_secret() {
         return 1
     fi
 
-    echo "$value" | gh secret set "$name" 2>/dev/null
-    print_success "$name"
+    local error_output
+    if error_output=$(echo "$value" | gh secret set "$name" 2>&1); then
+        print_success "$name"
+    else
+        print_error "Failed to set $name: $error_output"
+        return 1
+    fi
 }
 
 show_value() {
@@ -1001,6 +1006,17 @@ main() {
         print_subheader "Application $((i+1))"
         prompt_value "App name" "fetch-mcp"
         APP_NAMES[$i]="$REPLY"
+
+        # Validate: GitHub Actions forbids secrets starting with GITHUB_
+        local prefix_check
+        prefix_check=$(echo "${APP_NAMES[$i]}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+        if [[ "$prefix_check" == GITHUB_* ]]; then
+            print_error "App name '${APP_NAMES[$i]}' produces prefix '${prefix_check}_*' which starts with GITHUB_"
+            echo -e "  ${DIM}GitHub Actions does not allow secrets starting with GITHUB_${NC}"
+            echo -e "  ${DIM}Choose a different name (e.g., 'gh-mcp-t5' instead of 'github-mcp-t5')${NC}"
+            exit 1
+        fi
+
         prompt_value "Upstream repo" "org/my-api"
         APP_UPSTREAM_REPOS[$i]="$REPLY"
         prompt_value "Manifest path" "manifests/${APP_NAMES[$i]}/manifest.yml"
