@@ -31,7 +31,8 @@ The interactive script will prompt for:
    - **Name** — CF app base name (e.g., `fetch-t1`)
    - **Upstream repo** — GitHub repo containing releases (e.g., `org/my-api`)
    - **Manifest path** — path to the CF manifest in this repo (e.g., `manifests/fetch-mcp/manifest.yml`)
-   - **Artifact pattern** — release asset glob (e.g., `fetch-mcp-*.jar`)
+   - **Artifact pattern** — release asset glob (e.g., `fetch-mcp-*.jar`, `*_Linux_x86_64.tar.gz`)
+   - **Deploy type** — `file` (push artifact directly) or `archive` (extract tar.gz/zip first, push directory)
    - **CF env vars** *(optional)* — JSON object of environment variables to inject before app start
 6. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
 7. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
@@ -103,6 +104,43 @@ To inject environment variables into a CF app before it starts (e.g., API keys),
 ```
 
 The workflow uses `cf push --no-start` + `cf set-env` + `cf start` to inject these before the app boots. If no env vars are needed, leave the prompt empty and the workflow will use a simple `cf push`.
+
+## Deploy Types
+
+Each app can use one of two deploy types, selected during setup:
+
+### `file` (default)
+
+Downloads the release artifact and pushes it directly to CF. Use for JAR files, WAR files, or any single-file artifact:
+
+```
+Artifact pattern: fetch-mcp-*.jar
+Deploy type: file
+→ cf push -p ./artifact.jar
+```
+
+### `archive`
+
+Downloads a tar.gz or zip archive, extracts it, then pushes the extracted directory to CF. Use for pre-compiled binaries or source archives:
+
+```
+Artifact pattern: github-mcp-server_Linux_x86_64.tar.gz
+Deploy type: archive
+→ extract archive → cf push -p ./extracted/
+```
+
+The manifest controls which buildpack CF uses. For example, a pre-compiled Go binary needs `binary_buildpack`:
+
+```yaml
+applications:
+  - name: github-mcp
+    memory: 256M
+    buildpacks:
+      - binary_buildpack
+    command: ./github-mcp-server
+```
+
+Supported archive formats: `.tar.gz`, `.tgz`, `.zip`.
 
 ## Secrets Reference
 

@@ -1,0 +1,12 @@
+applications:
+- name: github-kl-mcp-server
+  instances: 1
+  memory: 124M
+  buildpacks:
+    - go_buildpack
+  env:
+    GO_INSTALL_PACKAGE_SPEC: github.com/github/github-mcp-server/cmd/github-mcp-server/
+    GITHUB_TOOLSETS: context,orgs,repos,pull_requests
+  command: "bin/github-mcp-server --gh-host https://github.com stdio"
+  routes:
+    - route: github-kl-mcp-server.apps.internal

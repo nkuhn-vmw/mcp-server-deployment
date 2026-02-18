@@ -172,6 +172,7 @@ APP_UPSTREAM_REPOS=()
 APP_MANIFEST_PATHS=()
 APP_ARTIFACT_PATTERNS=()
 APP_CF_ENV_JSONS=()
+APP_DEPLOY_TYPES=()
 
 RUNNER=""
 WORKFLOW_SLUG=""
@@ -507,7 +508,88 @@ CFAUTH_DELIM
     # Per-app download and deploy steps
     for i in $(seq 0 $((NUM_APPS - 1))); do
         echo ""
-        cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}" "$env_name" "$env_upper" "$env_label"
+        if [ "${APP_DEPLOY_TYPES[$i]}" = "archive" ]; then
+            # ── Archive mode: download, extract, push directory ──
+            cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}" "$env_name" "$env_upper" "$env_label"
+      - name: Download and extract %NAME% release assets
+        if: needs.validate-and-prepare.outputs.deploy_%LOWER% == 'true'
+        env:
+          _GHE_HOST: ${{ secrets.GHE_HOST }}
+          GH_TOKEN: ${{ secrets.GHE_TOKEN }}
+          UPSTREAM_REPO: ${{ secrets.%UPPER%_UPSTREAM_REPO }}
+          ARTIFACT_PATTERN: ${{ secrets.%UPPER%_ARTIFACT_PATTERN }}
+          %UPPER%_MANIFEST: ${{ secrets.%UPPER%_MANIFEST_PATH }}
+        run: |
+          [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.%LOWER%_version_dotted }}"
+
+          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+          echo "Downloading %NAME% artifact matching: ${PATTERN}"
+
+          mkdir -p ./%LOWER%
+          gh release download "${{ needs.validate-and-prepare.outputs.%LOWER%_release_tag }}" \
+            --repo "${UPSTREAM_REPO}" \
+            --pattern "${PATTERN}" \
+            --dir ./%LOWER%
+
+          ARCHIVE=$(ls ./%LOWER%/ | head -1)
+          echo "Extracting ${ARCHIVE}..."
+          mkdir -p ./%LOWER%/extracted
+          if [[ "${ARCHIVE}" == *.tar.gz ]] || [[ "${ARCHIVE}" == *.tgz ]]; then
+            tar -xzf "./%LOWER%/${ARCHIVE}" -C ./%LOWER%/extracted
+          elif [[ "${ARCHIVE}" == *.zip ]]; then
+            unzip -o "./%LOWER%/${ARCHIVE}" -d ./%LOWER%/extracted
+          else
+            echo "Error: Unknown archive format: ${ARCHIVE}"
+            exit 1
+          fi
+
+          MANIFEST_PATH="${%UPPER%_MANIFEST:-manifests/%LOWER%/manifest.yml}"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Error: %NAME% manifest not found at ${MANIFEST_PATH}"
+            exit 1
+          fi
+          cp "$MANIFEST_PATH" ./%LOWER%/extracted/manifest.yml
+          echo "%NAME% extracted contents:"
+          ls -la ./%LOWER%/extracted/
+BLOCK
+
+            echo ""
+            cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}" "$env_name" "$env_upper" "$env_label"
+      - name: Deploy %NAME% to %ENV_LABEL%
+        if: needs.validate-and-prepare.outputs.deploy_%LOWER% == 'true'
+        env:
+          %UPPER%_NAME: ${{ secrets.%UPPER%_NAME }}
+          VERSION: ${{ needs.validate-and-prepare.outputs.%LOWER%_version }}
+          %UPPER%_CF_ENV_JSON: ${{ secrets.%UPPER%_CF_ENV_JSON }}
+        run: |
+          DEPLOY_NAME="${%UPPER%_NAME}-%ENV%-${VERSION}"
+          echo "Deploying ${DEPLOY_NAME} from extracted directory..."
+
+          if [ -n "$%UPPER%_CF_ENV_JSON" ]; then
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./%LOWER%/extracted/manifest.yml \
+              -p "./%LOWER%/extracted" \
+              --no-start
+
+            echo "Setting env vars..."
+            echo "${%UPPER%_CF_ENV_JSON}" | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r key value; do
+              ./cf8 set-env "${DEPLOY_NAME}" "$key" "$value"
+            done
+
+            echo "Starting ${DEPLOY_NAME}..."
+            ./cf8 start "${DEPLOY_NAME}"
+          else
+            ./cf8 push "${DEPLOY_NAME}" \
+              -f ./%LOWER%/extracted/manifest.yml \
+              -p "./%LOWER%/extracted"
+          fi
+
+          echo "%NAME% deployed to %ENV%: ${DEPLOY_NAME}"
+BLOCK
+        else
+            # ── File mode: download artifact, push directly ──
+            cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}" "$env_name" "$env_upper" "$env_label"
       - name: Download %NAME% release assets
         if: needs.validate-and-prepare.outputs.deploy_%LOWER% == 'true'
         env:
@@ -539,8 +621,8 @@ CFAUTH_DELIM
           ls -la ./%LOWER%/
 BLOCK
 
-        echo ""
-        cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}" "$env_name" "$env_upper" "$env_label"
+            echo ""
+            cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}" "$env_name" "$env_upper" "$env_label"
       - name: Deploy %NAME% to %ENV_LABEL%
         if: needs.validate-and-prepare.outputs.deploy_%LOWER% == 'true'
         env:
@@ -575,6 +657,7 @@ BLOCK
 
           echo "%NAME% deployed to %ENV%: ${DEPLOY_NAME}"
 BLOCK
+        fi
     done
 
     emit_git_push_auth_step
@@ -769,6 +852,7 @@ save_debug_file() {
             echo "${APP_UPPERS[$i]}_NAME=${APP_NAMES[$i]}"
             echo "${APP_UPPERS[$i]}_MANIFEST_PATH=${APP_MANIFEST_PATHS[$i]}"
             echo "${APP_UPPERS[$i]}_ARTIFACT_PATTERN=${APP_ARTIFACT_PATTERNS[$i]}"
+            echo "${APP_UPPERS[$i]}_DEPLOY_TYPE=${APP_DEPLOY_TYPES[$i]}"
             echo "${APP_UPPERS[$i]}_CF_ENV_JSON=${APP_CF_ENV_JSONS[$i]:-(not set)}"
             echo ""
         done
@@ -923,6 +1007,17 @@ main() {
         APP_MANIFEST_PATHS[$i]="$REPLY"
         prompt_value "Artifact pattern" "${APP_NAMES[$i]}-*.jar"
         APP_ARTIFACT_PATTERNS[$i]="$REPLY"
+        echo ""
+        echo -e "  ${BOLD}Deploy type:${NC}"
+        echo -e "    ${BOLD}1)${NC} file    — Push the downloaded artifact directly (JAR, WAR, ZIP)"
+        echo -e "    ${BOLD}2)${NC} archive — Extract tar.gz/zip first, then push the extracted directory"
+        echo ""
+        read -p "  Choose deploy type [1]: " deploy_type_choice
+        case "$deploy_type_choice" in
+            2) APP_DEPLOY_TYPES[$i]="archive" ;;
+            *) APP_DEPLOY_TYPES[$i]="file" ;;
+        esac
+        echo ""
         echo -e "  ${DIM}Optional: JSON object of env vars to inject via cf set-env${NC}"
         echo -e "  ${DIM}Leave empty if the app does not need runtime env vars.${NC}"
         echo -e "  ${DIM}Example: {\"MY_API_KEY\":\"abc123\",\"DB_URL\":\"jdbc:...\"}${NC}"
@@ -1001,6 +1096,7 @@ main() {
         show_value "${APP_UPPERS[$i]}_NAME" "${APP_NAMES[$i]}"
         show_value "${APP_UPPERS[$i]}_MANIFEST_PATH" "${APP_MANIFEST_PATHS[$i]}"
         show_value "${APP_UPPERS[$i]}_ARTIFACT_PATTERN" "${APP_ARTIFACT_PATTERNS[$i]}"
+        show_value "Deploy type" "${APP_DEPLOY_TYPES[$i]}"
         show_value "${APP_UPPERS[$i]}_CF_ENV_JSON" "${APP_CF_ENV_JSONS[$i]}"
         echo ""
     done
