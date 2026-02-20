@@ -146,6 +146,8 @@ Supported archive formats: `.tar.gz`, `.tgz`, `.zip`.
 
 All secrets are configured automatically by the setup script. Secret names use app-specific prefixes derived from the app name (e.g., app name `fetch-t1` → prefix `FETCH_T1_*`).
 
+> **Note:** App names that produce a `GITHUB_` prefix (e.g., `github-mcp`) are rejected by the script because GitHub Actions reserves the `GITHUB_` namespace for secrets. Use an abbreviation instead (e.g., `gh-mcp`).
+
 ### Shared Secrets
 
 | Secret | Required | Description |
@@ -180,8 +182,6 @@ All secrets are configured automatically by the setup script. Secret names use a
 |------|---------|
 | `multi-app-setup-secrets.sh` | Interactive setup script — generates workflows and configures secrets |
 | `.github/workflows/deploy-*.yml` | Generated deployment workflows (created by setup script) |
-| `.github/workflows/fetch-websearch-deploy.yml` | Legacy standalone workflow for fetch + websearch MCP servers |
-| `setup-secrets-fetch-websearch.sh` | Legacy setup script for the standalone workflow |
 | `.multi-app-secrets-debug-*.txt` | Debug files with unmasked secret values (gitignored) |
 | `manifests/` | CF manifest files for each application |
 | `.gitignore` | Excludes debug files from version control |
