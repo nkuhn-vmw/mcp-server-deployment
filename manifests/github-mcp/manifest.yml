@@ -6,6 +6,6 @@ applications:
     - binary_buildpack
   env:
     GITHUB_TOOLSETS: context,orgs,repos,pull_requests
-  command: "./github-mcp-server --gh-host https://github.com stdio"
+  command: "./github-mcp-server --gh-host https://github.com --transport sse"
   routes:
     - route: github-kl-mcp-server.apps.internal
