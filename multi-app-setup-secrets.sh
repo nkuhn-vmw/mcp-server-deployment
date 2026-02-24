@@ -180,6 +180,7 @@ APP_CF_ENV_JSONS=()
 APP_DEPLOY_TYPES=()
 
 RUNNER=""
+WORKFLOW_NAME=""
 WORKFLOW_SLUG=""
 DISPLAY_NAME=""
 GENERATED_WORKFLOW=""
@@ -193,15 +194,9 @@ compute_prefixes() {
 }
 
 compute_names() {
-    WORKFLOW_SLUG=""
-    DISPLAY_NAME="Deploy"
-    for i in $(seq 0 $((NUM_APPS - 1))); do
-        [ $i -gt 0 ] && WORKFLOW_SLUG="${WORKFLOW_SLUG}-"
-        WORKFLOW_SLUG="${WORKFLOW_SLUG}${APP_NAMES[$i]}"
-        [ $i -gt 0 ] && DISPLAY_NAME="${DISPLAY_NAME} &"
-        DISPLAY_NAME="${DISPLAY_NAME} ${APP_NAMES[$i]}"
-    done
-    DISPLAY_NAME="${DISPLAY_NAME} to Cloud Foundry"
+    # Sanitize workflow name: lowercase, replace non-alphanumeric with hyphens, strip leading/trailing hyphens
+    WORKFLOW_SLUG=$(echo "$WORKFLOW_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/-/g; s/--*/-/g; s/^-//; s/-$//')
+    DISPLAY_NAME="Deploy ${WORKFLOW_NAME} to Cloud Foundry"
     GENERATED_WORKFLOW=".github/workflows/deploy-${WORKFLOW_SLUG}.yml"
     DEBUG_FILE=".multi-app-secrets-debug-${WORKFLOW_SLUG}.txt"
 }
@@ -837,6 +832,7 @@ save_debug_file() {
         echo "# Repository: ${REPO}"
         echo "# Platform: ${GITHUB_PLATFORM}"
         echo "# Shared secrets configured: ${CONFIGURE_SHARED}"
+        echo "# Workflow name: ${WORKFLOW_NAME}"
         echo "# Workflow file: ${GENERATED_WORKFLOW}"
         echo "# Runner: ${RUNNER}"
         echo ""
@@ -979,6 +975,20 @@ main() {
     prompt_value "Runner" "ubuntu-latest"
     RUNNER="$REPLY"
 
+    # Ask for workflow name
+    echo ""
+    echo -e "${BOLD}Workflow name${NC}"
+    echo -e "  ${DIM}A short name for the workflow and generated files.${NC}"
+    echo -e "  ${DIM}Examples: 't5-apps', 'mcp-prod', 'team-alpha'${NC}"
+    echo ""
+    prompt_value "Workflow name" ""
+    WORKFLOW_NAME="$REPLY"
+
+    if [ -z "$WORKFLOW_NAME" ]; then
+        print_error "Workflow name is required."
+        exit 1
+    fi
+
     show_requirements
 
     print_header "Enter Secret Values"
@@ -1087,8 +1097,8 @@ main() {
         echo -e "  App $((i+1)): ${CYAN}${APP_UPPERS[$i]}_*${NC}  (from ${APP_NAMES[$i]})"
     done
     echo ""
-    echo -e "${BOLD}Workflow to generate:${NC}"
-    echo -e "  ${CYAN}${GENERATED_WORKFLOW}${NC}"
+    echo -e "${BOLD}Workflow name:${NC}"
+    echo -e "  ${CYAN}${WORKFLOW_NAME}${NC}  →  ${CYAN}${GENERATED_WORKFLOW}${NC}"
     echo ""
     echo -e "${BOLD}Runner:${NC}"
     echo -e "  ${CYAN}${RUNNER}${NC}"

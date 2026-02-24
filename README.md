@@ -27,19 +27,20 @@ The interactive script will prompt for:
 2. **Shared vs app-only secrets** — first run configures everything; subsequent runs can skip shared secrets
 3. **Number of apps** — how many applications in this deployment group (1–10)
 4. **Runner** — GitHub Actions runner label (default: `ubuntu-latest`; use your self-hosted runner label for GHES)
-5. **Per-app details** — for each app:
+5. **Workflow name** — short name for the workflow and generated files (e.g., `t5-apps`, `mcp-prod`)
+6. **Per-app details** — for each app:
    - **Name** — CF app base name (e.g., `fetch-t1`)
    - **Upstream repo** — GitHub repo containing releases (e.g., `org/my-api`)
    - **Manifest path** — path to the CF manifest in this repo (e.g., `manifests/fetch-mcp/manifest.yml`)
    - **Artifact pattern** — release asset glob (e.g., `fetch-mcp-*.jar`, `*_Linux_x86_64.tar.gz`)
    - **Deploy type** — `file` (push artifact directly) or `archive` (extract tar.gz/zip first, push directory)
    - **CF env vars** *(optional)* — JSON object of environment variables to inject before app start
-6. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
-7. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
+7. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
+8. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
 
 The script generates:
-- A workflow at `.github/workflows/deploy-{app1}-{app2}-...{appN}.yml`
-- A debug file at `.multi-app-secrets-debug-{app1}-{app2}-...{appN}.txt` (gitignored)
+- A workflow at `.github/workflows/deploy-{workflow-name}.yml`
+- A debug file at `.multi-app-secrets-debug-{workflow-name}.txt` (gitignored)
 
 ### 2. Add CF Manifests
 
