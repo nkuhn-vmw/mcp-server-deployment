@@ -1,9 +1,10 @@
 applications:
 - name: github-kl-mcp-server
   instances: 1
-  memory: 124M
+  memory: 256M
   buildpacks:
     - binary_buildpack
+  health-check-type: process
   env:
     GITHUB_TOOLSETS: context,orgs,repos,pull_requests
   command: "./github-mcp-server --gh-host https://github.com --transport sse"
