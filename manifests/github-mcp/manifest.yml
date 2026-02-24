@@ -5,8 +5,6 @@ applications:
   buildpacks:
     - binary_buildpack
   health-check-type: process
-  env:
-    GITHUB_TOOLSETS: context,orgs,repos,pull_requests
-  command: "./github-mcp-server --gh-host https://github.com --transport sse"
+  command: "./github-mcp-server http --port $PORT --gh-host https://github.com --toolsets context,orgs,repos,pull_requests"
   routes:
     - route: github-kl-mcp-server.apps.internal
