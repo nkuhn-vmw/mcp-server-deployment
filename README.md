@@ -8,8 +8,9 @@ The setup script (`multi-app-setup-secrets.sh`) programmatically generates a Git
 
 1. Prompts for application details (name, upstream repo, artifact pattern, etc.)
 2. Generates a workflow YAML file under `.github/workflows/`
-3. Configures all required GitHub secrets with app-specific prefixes
-4. Saves an unmasked debug file for troubleshooting
+3. Optionally generates starter CF manifest files for each app
+4. Configures all required GitHub secrets with app-specific prefixes
+5. Saves an unmasked debug file for troubleshooting
 
 You can run the script multiple times to create separate workflows for different app groups. All workflows share the same CF credentials and production approval gate.
 
@@ -28,31 +29,32 @@ The interactive script will prompt for:
 3. **Number of apps** — how many applications in this deployment group (1–10)
 4. **Runner** — GitHub Actions runner label (default: `ubuntu-latest`; use your self-hosted runner label for GHES)
 5. **Workflow name** — short name for the workflow and generated files (e.g., `t5-apps`, `mcp-prod`)
-6. **Per-app details** — for each app:
+6. **Manifest mode** — *Generate* (auto-create starter manifests) or *Bring your own* (provide paths to existing manifests)
+7. **Per-app details** — for each app:
    - **Name** — CF app base name (e.g., `fetch-t1`)
    - **Upstream repo** — GitHub repo containing releases (e.g., `org/my-api`)
-   - **Manifest path** — path to the CF manifest in this repo (e.g., `manifests/fetch-mcp/manifest.yml`)
+   - **Manifest path** — path to the CF manifest in this repo *(only in "bring your own" mode)*
    - **Artifact pattern** — release asset glob (e.g., `fetch-mcp-*.jar`, `*_Linux_x86_64.tar.gz`)
    - **Deploy type** — `file` (push artifact directly) or `archive` (extract tar.gz/zip first, push directory)
    - **CF env vars** *(optional)* — JSON object of environment variables to inject before app start
-7. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
-8. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
+8. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
+9. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
 
 The script generates:
 - A workflow at `.github/workflows/deploy-{workflow-name}.yml`
+- Starter manifest files at `manifests/{app-name}/manifest.yml` *(when using "Generate" mode)*
 - A debug file at `.multi-app-secrets-debug-{workflow-name}.txt` (gitignored)
 
-### 2. Add CF Manifests
+### 2. Review CF Manifests
 
-Create manifest files for each application. Paths are configurable during setup:
+If you chose **Generate** mode, the script creates starter manifest files at `manifests/{app-name}/manifest.yml` with sensible defaults based on deploy type:
 
-```
-manifests/
-  fetch-mcp/
-    manifest.yml
-  websearch-mcp/
-    manifest.yml
-```
+- **`file` apps** — Java/Spring template with `java_buildpack_offline`, 1G memory, HTTP health check
+- **`archive` apps** — Binary template with `binary_buildpack`, 256M memory, process health check
+
+Review and customize these manifests for your applications (memory, buildpack, env vars, services, health checks, etc.). Existing manifests are never overwritten.
+
+If you chose **Bring your own** mode, create manifest files at the paths you specified during setup.
 
 ### 3. Configure the Production Approval Gate
 
@@ -64,7 +66,7 @@ manifests/
 
 ```bash
 git add .github/workflows/deploy-*.yml manifests/
-git commit -m "Add deployment workflow"
+git commit -m "Add deployment workflow and manifests"
 git push
 ```
 
