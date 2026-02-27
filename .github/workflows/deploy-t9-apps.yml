@@ -56,12 +56,15 @@ jobs:
       fetch9_release_tag: ${{ steps.validate.outputs.fetch9_release_tag }}
       fetch9_version: ${{ steps.validate.outputs.fetch9_version }}
       fetch9_version_dotted: ${{ steps.validate.outputs.fetch9_version_dotted }}
+      fetch9_source: ${{ steps.validate.outputs.fetch9_source }}
       gh9_release_tag: ${{ steps.validate.outputs.gh9_release_tag }}
       gh9_version: ${{ steps.validate.outputs.gh9_version }}
       gh9_version_dotted: ${{ steps.validate.outputs.gh9_version_dotted }}
+      gh9_source: ${{ steps.validate.outputs.gh9_source }}
       web9_release_tag: ${{ steps.validate.outputs.web9_release_tag }}
       web9_version: ${{ steps.validate.outputs.web9_version }}
       web9_version_dotted: ${{ steps.validate.outputs.web9_version_dotted }}
+      web9_source: ${{ steps.validate.outputs.web9_source }}
       deploy_fetch9: ${{ steps.validate.outputs.deploy_fetch9 }}
       deploy_gh9: ${{ steps.validate.outputs.deploy_gh9 }}
       deploy_web9: ${{ steps.validate.outputs.deploy_web9 }}
@@ -151,124 +154,181 @@ jobs:
           DEPLOY_GH9="${{ inputs.deploy_gh9 }}"
           DEPLOY_WEB9="${{ inputs.deploy_web9 }}"
 
-          # Validate fetch9 release
+          # Validate fetch9 release or tag
           if [ "$DEPLOY_FETCH9" = "true" ]; then
             FETCH9_TAG="${{ inputs.fetch9_release_tag }}"
+            FETCH9_SOURCE="release"
             echo "Validating fetch9 release ${FETCH9_TAG} in ${FETCH9_UPSTREAM_REPO}..."
 
-            # Try exact tag first
+            # Try exact tag as release first
             RELEASE_INFO=$(gh api "repos/${FETCH9_UPSTREAM_REPO}/releases/tags/${FETCH9_TAG}" --jq '.tag_name' 2>&1) || {
               RELEASE_INFO=""
               # Try with 'v' prefix if tag doesn't start with 'v'
               if [[ "${FETCH9_TAG}" != v* ]]; then
                 ALT_TAG="v${FETCH9_TAG}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${FETCH9_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               else
                 # Try without 'v' prefix
                 ALT_TAG="${FETCH9_TAG#v}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${FETCH9_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               fi
               # Fall back to searching releases by name
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Tag variants not found, searching by release name..."
+                echo "Release variants not found, searching by release name..."
                 RELEASE_INFO=$(gh api "repos/${FETCH9_UPSTREAM_REPO}/releases" --jq ".[] | select(.name == \"${FETCH9_TAG}\") | .tag_name" 2>&1 | head -1) || RELEASE_INFO=""
               fi
+              # Fall back to checking if it exists as a plain git tag
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Error: Release ${FETCH9_TAG} not found in ${FETCH9_UPSTREAM_REPO}"
-                echo "Tried: tag '${FETCH9_TAG}', alternate tag format, and release name match"
+                echo "No release found, checking if git tag exists..."
+                TAG_CHECK=$(gh api "repos/${FETCH9_UPSTREAM_REPO}/git/ref/tags/${FETCH9_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                if [ -z "$TAG_CHECK" ] && [[ "${FETCH9_TAG}" != v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${FETCH9_UPSTREAM_REPO}/git/ref/tags/v${FETCH9_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && FETCH9_TAG="v${FETCH9_TAG}"
+                elif [ -z "$TAG_CHECK" ] && [[ "${FETCH9_TAG}" == v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${FETCH9_UPSTREAM_REPO}/git/ref/tags/${FETCH9_TAG#v}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && FETCH9_TAG="${FETCH9_TAG#v}"
+                fi
+                if [ -n "$TAG_CHECK" ]; then
+                  echo "Found as git tag (no release): ${FETCH9_TAG}"
+                  FETCH9_SOURCE="tag"
+                  RELEASE_INFO="${FETCH9_TAG}"
+                fi
+              fi
+              if [ -z "$RELEASE_INFO" ]; then
+                echo "Error: ${FETCH9_TAG} not found in ${FETCH9_UPSTREAM_REPO}"
+                echo "Tried: release tag, alternate format, release name, and git tag"
                 exit 1
               fi
               FETCH9_TAG="$RELEASE_INFO"
             }
-            echo "fetch9 release validated: ${FETCH9_TAG}"
+            echo "fetch9 validated: ${FETCH9_TAG} (source: ${FETCH9_SOURCE})"
 
             FETCH9_VERSION=${FETCH9_TAG#v}
             FETCH9_APP_VERSION=${FETCH9_VERSION//./-}
             echo "fetch9_release_tag=${FETCH9_TAG}" >> "$GITHUB_OUTPUT"
             echo "fetch9_version=${FETCH9_APP_VERSION}" >> "$GITHUB_OUTPUT"
             echo "fetch9_version_dotted=${FETCH9_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "fetch9_source=${FETCH9_SOURCE}" >> "$GITHUB_OUTPUT"
           fi
 
-          # Validate gh9 release
+          # Validate gh9 release or tag
           if [ "$DEPLOY_GH9" = "true" ]; then
             GH9_TAG="${{ inputs.gh9_release_tag }}"
+            GH9_SOURCE="release"
             echo "Validating gh9 release ${GH9_TAG} in ${GH9_UPSTREAM_REPO}..."
 
-            # Try exact tag first
+            # Try exact tag as release first
             RELEASE_INFO=$(gh api "repos/${GH9_UPSTREAM_REPO}/releases/tags/${GH9_TAG}" --jq '.tag_name' 2>&1) || {
               RELEASE_INFO=""
               # Try with 'v' prefix if tag doesn't start with 'v'
               if [[ "${GH9_TAG}" != v* ]]; then
                 ALT_TAG="v${GH9_TAG}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${GH9_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               else
                 # Try without 'v' prefix
                 ALT_TAG="${GH9_TAG#v}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${GH9_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               fi
               # Fall back to searching releases by name
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Tag variants not found, searching by release name..."
+                echo "Release variants not found, searching by release name..."
                 RELEASE_INFO=$(gh api "repos/${GH9_UPSTREAM_REPO}/releases" --jq ".[] | select(.name == \"${GH9_TAG}\") | .tag_name" 2>&1 | head -1) || RELEASE_INFO=""
               fi
+              # Fall back to checking if it exists as a plain git tag
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Error: Release ${GH9_TAG} not found in ${GH9_UPSTREAM_REPO}"
-                echo "Tried: tag '${GH9_TAG}', alternate tag format, and release name match"
+                echo "No release found, checking if git tag exists..."
+                TAG_CHECK=$(gh api "repos/${GH9_UPSTREAM_REPO}/git/ref/tags/${GH9_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                if [ -z "$TAG_CHECK" ] && [[ "${GH9_TAG}" != v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${GH9_UPSTREAM_REPO}/git/ref/tags/v${GH9_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && GH9_TAG="v${GH9_TAG}"
+                elif [ -z "$TAG_CHECK" ] && [[ "${GH9_TAG}" == v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${GH9_UPSTREAM_REPO}/git/ref/tags/${GH9_TAG#v}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && GH9_TAG="${GH9_TAG#v}"
+                fi
+                if [ -n "$TAG_CHECK" ]; then
+                  echo "Found as git tag (no release): ${GH9_TAG}"
+                  GH9_SOURCE="tag"
+                  RELEASE_INFO="${GH9_TAG}"
+                fi
+              fi
+              if [ -z "$RELEASE_INFO" ]; then
+                echo "Error: ${GH9_TAG} not found in ${GH9_UPSTREAM_REPO}"
+                echo "Tried: release tag, alternate format, release name, and git tag"
                 exit 1
               fi
               GH9_TAG="$RELEASE_INFO"
             }
-            echo "gh9 release validated: ${GH9_TAG}"
+            echo "gh9 validated: ${GH9_TAG} (source: ${GH9_SOURCE})"
 
             GH9_VERSION=${GH9_TAG#v}
             GH9_APP_VERSION=${GH9_VERSION//./-}
             echo "gh9_release_tag=${GH9_TAG}" >> "$GITHUB_OUTPUT"
             echo "gh9_version=${GH9_APP_VERSION}" >> "$GITHUB_OUTPUT"
             echo "gh9_version_dotted=${GH9_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "gh9_source=${GH9_SOURCE}" >> "$GITHUB_OUTPUT"
           fi
 
-          # Validate web9 release
+          # Validate web9 release or tag
           if [ "$DEPLOY_WEB9" = "true" ]; then
             WEB9_TAG="${{ inputs.web9_release_tag }}"
+            WEB9_SOURCE="release"
             echo "Validating web9 release ${WEB9_TAG} in ${WEB9_UPSTREAM_REPO}..."
 
-            # Try exact tag first
+            # Try exact tag as release first
             RELEASE_INFO=$(gh api "repos/${WEB9_UPSTREAM_REPO}/releases/tags/${WEB9_TAG}" --jq '.tag_name' 2>&1) || {
               RELEASE_INFO=""
               # Try with 'v' prefix if tag doesn't start with 'v'
               if [[ "${WEB9_TAG}" != v* ]]; then
                 ALT_TAG="v${WEB9_TAG}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${WEB9_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               else
                 # Try without 'v' prefix
                 ALT_TAG="${WEB9_TAG#v}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${WEB9_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               fi
               # Fall back to searching releases by name
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Tag variants not found, searching by release name..."
+                echo "Release variants not found, searching by release name..."
                 RELEASE_INFO=$(gh api "repos/${WEB9_UPSTREAM_REPO}/releases" --jq ".[] | select(.name == \"${WEB9_TAG}\") | .tag_name" 2>&1 | head -1) || RELEASE_INFO=""
               fi
+              # Fall back to checking if it exists as a plain git tag
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Error: Release ${WEB9_TAG} not found in ${WEB9_UPSTREAM_REPO}"
-                echo "Tried: tag '${WEB9_TAG}', alternate tag format, and release name match"
+                echo "No release found, checking if git tag exists..."
+                TAG_CHECK=$(gh api "repos/${WEB9_UPSTREAM_REPO}/git/ref/tags/${WEB9_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                if [ -z "$TAG_CHECK" ] && [[ "${WEB9_TAG}" != v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${WEB9_UPSTREAM_REPO}/git/ref/tags/v${WEB9_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && WEB9_TAG="v${WEB9_TAG}"
+                elif [ -z "$TAG_CHECK" ] && [[ "${WEB9_TAG}" == v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${WEB9_UPSTREAM_REPO}/git/ref/tags/${WEB9_TAG#v}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && WEB9_TAG="${WEB9_TAG#v}"
+                fi
+                if [ -n "$TAG_CHECK" ]; then
+                  echo "Found as git tag (no release): ${WEB9_TAG}"
+                  WEB9_SOURCE="tag"
+                  RELEASE_INFO="${WEB9_TAG}"
+                fi
+              fi
+              if [ -z "$RELEASE_INFO" ]; then
+                echo "Error: ${WEB9_TAG} not found in ${WEB9_UPSTREAM_REPO}"
+                echo "Tried: release tag, alternate format, release name, and git tag"
                 exit 1
               fi
               WEB9_TAG="$RELEASE_INFO"
             }
-            echo "web9 release validated: ${WEB9_TAG}"
+            echo "web9 validated: ${WEB9_TAG} (source: ${WEB9_SOURCE})"
 
             WEB9_VERSION=${WEB9_TAG#v}
             WEB9_APP_VERSION=${WEB9_VERSION//./-}
             echo "web9_release_tag=${WEB9_TAG}" >> "$GITHUB_OUTPUT"
             echo "web9_version=${WEB9_APP_VERSION}" >> "$GITHUB_OUTPUT"
             echo "web9_version_dotted=${WEB9_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "web9_source=${WEB9_SOURCE}" >> "$GITHUB_OUTPUT"
           fi
 
           echo "deploy_fetch9=${DEPLOY_FETCH9}" >> "$GITHUB_OUTPUT"
@@ -323,16 +383,28 @@ jobs:
           FETCH9_MANIFEST: ${{ secrets.FETCH9_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.fetch9_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.fetch9_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.fetch9_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading fetch9 artifact matching: ${PATTERN}"
-
           mkdir -p ./fetch9
-          gh release download "${{ needs.validate-and-prepare.outputs.fetch9_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./fetch9
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading fetch9 source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./fetch9/source.tar.gz"
+            echo "Extracting source archive..."
+            mkdir -p ./fetch9/source-tmp
+            tar -xzf "./fetch9/source.tar.gz" -C ./fetch9/source-tmp --strip-components=1
+            rm "./fetch9/source.tar.gz"
+            mv ./fetch9/source-tmp/* ./fetch9/ 2>/dev/null || true
+            rm -rf ./fetch9/source-tmp
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading fetch9 release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./fetch9
+          fi
 
           MANIFEST_PATH="${FETCH9_MANIFEST:-manifests/fetch9/manifest.yml}"
           if [ ! -f "$MANIFEST_PATH" ]; then
@@ -390,16 +462,22 @@ jobs:
           GH9_MANIFEST: ${{ secrets.GH9_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.gh9_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.gh9_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.gh9_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading gh9 artifact matching: ${PATTERN}"
-
           mkdir -p ./gh9
-          gh release download "${{ needs.validate-and-prepare.outputs.gh9_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./gh9
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading gh9 source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./gh9/source.tar.gz"
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading gh9 release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./gh9
+          fi
 
           ARCHIVE=$(ls ./gh9/ | head -1)
           echo "Extracting ${ARCHIVE}..."
@@ -466,16 +544,28 @@ jobs:
           WEB9_MANIFEST: ${{ secrets.WEB9_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.web9_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.web9_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.web9_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading web9 artifact matching: ${PATTERN}"
-
           mkdir -p ./web9
-          gh release download "${{ needs.validate-and-prepare.outputs.web9_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./web9
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading web9 source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./web9/source.tar.gz"
+            echo "Extracting source archive..."
+            mkdir -p ./web9/source-tmp
+            tar -xzf "./web9/source.tar.gz" -C ./web9/source-tmp --strip-components=1
+            rm "./web9/source.tar.gz"
+            mv ./web9/source-tmp/* ./web9/ 2>/dev/null || true
+            rm -rf ./web9/source-tmp
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading web9 release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./web9
+          fi
 
           MANIFEST_PATH="${WEB9_MANIFEST:-manifests/web9/manifest.yml}"
           if [ ! -f "$MANIFEST_PATH" ]; then
@@ -733,16 +823,28 @@ jobs:
           FETCH9_MANIFEST: ${{ secrets.FETCH9_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.fetch9_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.fetch9_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.fetch9_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading fetch9 artifact matching: ${PATTERN}"
-
           mkdir -p ./fetch9
-          gh release download "${{ needs.validate-and-prepare.outputs.fetch9_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./fetch9
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading fetch9 source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./fetch9/source.tar.gz"
+            echo "Extracting source archive..."
+            mkdir -p ./fetch9/source-tmp
+            tar -xzf "./fetch9/source.tar.gz" -C ./fetch9/source-tmp --strip-components=1
+            rm "./fetch9/source.tar.gz"
+            mv ./fetch9/source-tmp/* ./fetch9/ 2>/dev/null || true
+            rm -rf ./fetch9/source-tmp
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading fetch9 release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./fetch9
+          fi
 
           MANIFEST_PATH="${FETCH9_MANIFEST:-manifests/fetch9/manifest.yml}"
           if [ ! -f "$MANIFEST_PATH" ]; then
@@ -800,16 +902,22 @@ jobs:
           GH9_MANIFEST: ${{ secrets.GH9_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.gh9_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.gh9_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.gh9_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading gh9 artifact matching: ${PATTERN}"
-
           mkdir -p ./gh9
-          gh release download "${{ needs.validate-and-prepare.outputs.gh9_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./gh9
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading gh9 source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./gh9/source.tar.gz"
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading gh9 release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./gh9
+          fi
 
           ARCHIVE=$(ls ./gh9/ | head -1)
           echo "Extracting ${ARCHIVE}..."
@@ -876,16 +984,28 @@ jobs:
           WEB9_MANIFEST: ${{ secrets.WEB9_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.web9_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.web9_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.web9_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading web9 artifact matching: ${PATTERN}"
-
           mkdir -p ./web9
-          gh release download "${{ needs.validate-and-prepare.outputs.web9_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./web9
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading web9 source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./web9/source.tar.gz"
+            echo "Extracting source archive..."
+            mkdir -p ./web9/source-tmp
+            tar -xzf "./web9/source.tar.gz" -C ./web9/source-tmp --strip-components=1
+            rm "./web9/source.tar.gz"
+            mv ./web9/source-tmp/* ./web9/ 2>/dev/null || true
+            rm -rf ./web9/source-tmp
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading web9 release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./web9
+          fi
 
           MANIFEST_PATH="${WEB9_MANIFEST:-manifests/web9/manifest.yml}"
           if [ ! -f "$MANIFEST_PATH" ]; then
