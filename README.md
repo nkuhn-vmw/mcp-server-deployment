@@ -153,13 +153,16 @@ Each app has separate routes for nonprod and prod, configured during setup. The 
 
 ## Release Tag Resolution
 
-When you enter a release tag (e.g., `v2.7.0` or `2.7.0`), the workflow tries to find the release in this order:
+When you enter a release tag (e.g., `v2.7.0` or `2.7.0`), the workflow tries to find it in this order:
 
-1. Exact tag match (e.g., `v2.7.0`)
-2. Alternate format — adds or removes the `v` prefix (e.g., tries `2.7.0` if `v2.7.0` fails)
-3. Release name match — searches all releases for a matching name
+1. **Release by exact tag** (e.g., `v2.7.0`)
+2. **Release by alternate format** — adds or removes the `v` prefix (e.g., tries `2.7.0` if `v2.7.0` fails)
+3. **Release by name** — searches all releases for a matching name
+4. **Git tag** — checks if the tag exists as a plain git tag (no release required)
 
-This means you can enter either `v2.7.0` or `2.7.0` regardless of how the upstream repo tags its releases.
+If found as a release, the workflow downloads release assets using the artifact pattern. If found as a tag only, the workflow downloads the source archive from that tag instead.
+
+This means you can enter either `v2.7.0` or `2.7.0`, and it works whether the upstream repo uses GitHub Releases or plain git tags.
 
 ## Secrets Reference
 

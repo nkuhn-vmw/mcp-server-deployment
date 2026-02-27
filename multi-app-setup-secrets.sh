@@ -301,6 +301,7 @@ EOF
       %LOWER%_release_tag: ${{ steps.validate.outputs.%LOWER%_release_tag }}
       %LOWER%_version: ${{ steps.validate.outputs.%LOWER%_version }}
       %LOWER%_version_dotted: ${{ steps.validate.outputs.%LOWER%_version_dotted }}
+      %LOWER%_source: ${{ steps.validate.outputs.%LOWER%_source }}
 BLOCK
     done
     for i in $(seq 0 $((NUM_APPS - 1))); do
@@ -404,44 +405,63 @@ BLOCK
     for i in $(seq 0 $((NUM_APPS - 1))); do
         cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}"
 
-          # Validate %NAME% release
+          # Validate %NAME% release or tag
           if [ "$DEPLOY_%UPPER%" = "true" ]; then
             %UPPER%_TAG="${{ inputs.%LOWER%_release_tag }}"
+            %UPPER%_SOURCE="release"
             echo "Validating %NAME% release ${%UPPER%_TAG} in ${%UPPER%_UPSTREAM_REPO}..."
 
-            # Try exact tag first
+            # Try exact tag as release first
             RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases/tags/${%UPPER%_TAG}" --jq '.tag_name' 2>&1) || {
               RELEASE_INFO=""
               # Try with 'v' prefix if tag doesn't start with 'v'
               if [[ "${%UPPER%_TAG}" != v* ]]; then
                 ALT_TAG="v${%UPPER%_TAG}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               else
                 # Try without 'v' prefix
                 ALT_TAG="${%UPPER%_TAG#v}"
-                echo "Tag not found, trying ${ALT_TAG}..."
+                echo "Release not found, trying ${ALT_TAG}..."
                 RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
               fi
               # Fall back to searching releases by name
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Tag variants not found, searching by release name..."
+                echo "Release variants not found, searching by release name..."
                 RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases" --jq ".[] | select(.name == \"${%UPPER%_TAG}\") | .tag_name" 2>&1 | head -1) || RELEASE_INFO=""
               fi
+              # Fall back to checking if it exists as a plain git tag
               if [ -z "$RELEASE_INFO" ]; then
-                echo "Error: Release ${%UPPER%_TAG} not found in ${%UPPER%_UPSTREAM_REPO}"
-                echo "Tried: tag '${%UPPER%_TAG}', alternate tag format, and release name match"
+                echo "No release found, checking if git tag exists..."
+                TAG_CHECK=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/git/ref/tags/${%UPPER%_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                if [ -z "$TAG_CHECK" ] && [[ "${%UPPER%_TAG}" != v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/git/ref/tags/v${%UPPER%_TAG}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && %UPPER%_TAG="v${%UPPER%_TAG}"
+                elif [ -z "$TAG_CHECK" ] && [[ "${%UPPER%_TAG}" == v* ]]; then
+                  TAG_CHECK=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/git/ref/tags/${%UPPER%_TAG#v}" --jq '.ref' 2>&1) || TAG_CHECK=""
+                  [ -n "$TAG_CHECK" ] && %UPPER%_TAG="${%UPPER%_TAG#v}"
+                fi
+                if [ -n "$TAG_CHECK" ]; then
+                  echo "Found as git tag (no release): ${%UPPER%_TAG}"
+                  %UPPER%_SOURCE="tag"
+                  RELEASE_INFO="${%UPPER%_TAG}"
+                fi
+              fi
+              if [ -z "$RELEASE_INFO" ]; then
+                echo "Error: ${%UPPER%_TAG} not found in ${%UPPER%_UPSTREAM_REPO}"
+                echo "Tried: release tag, alternate format, release name, and git tag"
                 exit 1
               fi
               %UPPER%_TAG="$RELEASE_INFO"
             }
-            echo "%NAME% release validated: ${%UPPER%_TAG}"
+            echo "%NAME% validated: ${%UPPER%_TAG} (source: ${%UPPER%_SOURCE})"
 
             %UPPER%_VERSION=${%UPPER%_TAG#v}
             %UPPER%_APP_VERSION=${%UPPER%_VERSION//./-}
             echo "%LOWER%_release_tag=${%UPPER%_TAG}" >> "$GITHUB_OUTPUT"
             echo "%LOWER%_version=${%UPPER%_APP_VERSION}" >> "$GITHUB_OUTPUT"
             echo "%LOWER%_version_dotted=${%UPPER%_VERSION}" >> "$GITHUB_OUTPUT"
+            echo "%LOWER%_source=${%UPPER%_SOURCE}" >> "$GITHUB_OUTPUT"
           fi
 BLOCK
     done
@@ -546,16 +566,22 @@ CFAUTH_DELIM
           %UPPER%_MANIFEST: ${{ secrets.%UPPER%_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.%LOWER%_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.%LOWER%_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.%LOWER%_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading %NAME% artifact matching: ${PATTERN}"
-
           mkdir -p ./%LOWER%
-          gh release download "${{ needs.validate-and-prepare.outputs.%LOWER%_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./%LOWER%
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading %NAME% source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./%LOWER%/source.tar.gz"
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading %NAME% release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./%LOWER%
+          fi
 
           ARCHIVE=$(ls ./%LOWER%/ | head -1)
           echo "Extracting ${ARCHIVE}..."
@@ -628,16 +654,28 @@ BLOCK
           %UPPER%_MANIFEST: ${{ secrets.%UPPER%_MANIFEST_PATH }}
         run: |
           [ -n "$_GHE_HOST" ] && export GH_HOST="$_GHE_HOST"
+          TAG="${{ needs.validate-and-prepare.outputs.%LOWER%_release_tag }}"
+          SOURCE="${{ needs.validate-and-prepare.outputs.%LOWER%_source }}"
           VERSION_DOTTED="${{ needs.validate-and-prepare.outputs.%LOWER%_version_dotted }}"
 
-          PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
-          echo "Downloading %NAME% artifact matching: ${PATTERN}"
-
           mkdir -p ./%LOWER%
-          gh release download "${{ needs.validate-and-prepare.outputs.%LOWER%_release_tag }}" \
-            --repo "${UPSTREAM_REPO}" \
-            --pattern "${PATTERN}" \
-            --dir ./%LOWER%
+          if [ "$SOURCE" = "tag" ]; then
+            echo "Downloading %NAME% source archive for tag ${TAG}..."
+            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./%LOWER%/source.tar.gz"
+            echo "Extracting source archive..."
+            mkdir -p ./%LOWER%/source-tmp
+            tar -xzf "./%LOWER%/source.tar.gz" -C ./%LOWER%/source-tmp --strip-components=1
+            rm "./%LOWER%/source.tar.gz"
+            mv ./%LOWER%/source-tmp/* ./%LOWER%/ 2>/dev/null || true
+            rm -rf ./%LOWER%/source-tmp
+          else
+            PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
+            echo "Downloading %NAME% release artifact matching: ${PATTERN}"
+            gh release download "${TAG}" \
+              --repo "${UPSTREAM_REPO}" \
+              --pattern "${PATTERN}" \
+              --dir ./%LOWER%
+          fi
 
           MANIFEST_PATH="${%UPPER%_MANIFEST:-manifests/%LOWER%/manifest.yml}"
           if [ ! -f "$MANIFEST_PATH" ]; then
