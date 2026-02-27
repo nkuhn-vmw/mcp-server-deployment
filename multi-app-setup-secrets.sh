@@ -618,11 +618,14 @@ BLOCK
           DEPLOY_NAME="${%UPPER%_NAME}-%ENV%-${VERSION}"
           echo "Deploying ${DEPLOY_NAME} from extracted directory..."
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${%UPPER%_ROUTE}|" ./%LOWER%/extracted/manifest.yml
+          echo "Route set to: ${%UPPER%_ROUTE}"
+
           if [ -n "$%UPPER%_CF_ENV_JSON" ]; then
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/extracted/manifest.yml \
               -p "./%LOWER%/extracted" \
-              --no-route --route "${%UPPER%_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -635,8 +638,7 @@ BLOCK
           else
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/extracted/manifest.yml \
-              -p "./%LOWER%/extracted" \
-              --no-route --route "${%UPPER%_ROUTE}"
+              -p "./%LOWER%/extracted"
           fi
 
           echo "%NAME% deployed to %ENV%: ${DEPLOY_NAME}"
@@ -701,12 +703,15 @@ BLOCK
           ARTIFACT=$(ls ./%LOWER%/ | grep -v manifest.yml | head -1)
           echo "Artifact found: ${ARTIFACT}"
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${%UPPER%_ROUTE}|" ./%LOWER%/manifest.yml
+          echo "Route set to: ${%UPPER%_ROUTE}"
+
           if [ -n "$%UPPER%_CF_ENV_JSON" ]; then
             echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/manifest.yml \
               -p "./%LOWER%/${ARTIFACT}" \
-              --no-route --route "${%UPPER%_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -720,8 +725,7 @@ BLOCK
             echo "Deploying ${DEPLOY_NAME}..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/manifest.yml \
-              -p "./%LOWER%/${ARTIFACT}" \
-              --no-route --route "${%UPPER%_ROUTE}"
+              -p "./%LOWER%/${ARTIFACT}"
           fi
 
           echo "%NAME% deployed to %ENV%: ${DEPLOY_NAME}"

@@ -427,12 +427,15 @@ jobs:
           ARTIFACT=$(ls ./fetch9/ | grep -v manifest.yml | head -1)
           echo "Artifact found: ${ARTIFACT}"
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${FETCH9_ROUTE}|" ./fetch9/manifest.yml
+          echo "Route set to: ${FETCH9_ROUTE}"
+
           if [ -n "$FETCH9_CF_ENV_JSON" ]; then
             echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./fetch9/manifest.yml \
               -p "./fetch9/${ARTIFACT}" \
-              --no-route --route "${FETCH9_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -446,8 +449,7 @@ jobs:
             echo "Deploying ${DEPLOY_NAME}..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./fetch9/manifest.yml \
-              -p "./fetch9/${ARTIFACT}" \
-              --no-route --route "${FETCH9_ROUTE}"
+              -p "./fetch9/${ARTIFACT}"
           fi
 
           echo "fetch9 deployed to nonprod: ${DEPLOY_NAME}"
@@ -511,11 +513,14 @@ jobs:
           DEPLOY_NAME="${GH9_NAME}-nonprod-${VERSION}"
           echo "Deploying ${DEPLOY_NAME} from extracted directory..."
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${GH9_ROUTE}|" ./gh9/extracted/manifest.yml
+          echo "Route set to: ${GH9_ROUTE}"
+
           if [ -n "$GH9_CF_ENV_JSON" ]; then
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./gh9/extracted/manifest.yml \
               -p "./gh9/extracted" \
-              --no-route --route "${GH9_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -528,8 +533,7 @@ jobs:
           else
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./gh9/extracted/manifest.yml \
-              -p "./gh9/extracted" \
-              --no-route --route "${GH9_ROUTE}"
+              -p "./gh9/extracted"
           fi
 
           echo "gh9 deployed to nonprod: ${DEPLOY_NAME}"
@@ -588,12 +592,15 @@ jobs:
           ARTIFACT=$(ls ./web9/ | grep -v manifest.yml | head -1)
           echo "Artifact found: ${ARTIFACT}"
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${WEB9_ROUTE}|" ./web9/manifest.yml
+          echo "Route set to: ${WEB9_ROUTE}"
+
           if [ -n "$WEB9_CF_ENV_JSON" ]; then
             echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./web9/manifest.yml \
               -p "./web9/${ARTIFACT}" \
-              --no-route --route "${WEB9_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -607,8 +614,7 @@ jobs:
             echo "Deploying ${DEPLOY_NAME}..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./web9/manifest.yml \
-              -p "./web9/${ARTIFACT}" \
-              --no-route --route "${WEB9_ROUTE}"
+              -p "./web9/${ARTIFACT}"
           fi
 
           echo "web9 deployed to nonprod: ${DEPLOY_NAME}"
@@ -867,12 +873,15 @@ jobs:
           ARTIFACT=$(ls ./fetch9/ | grep -v manifest.yml | head -1)
           echo "Artifact found: ${ARTIFACT}"
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${FETCH9_ROUTE}|" ./fetch9/manifest.yml
+          echo "Route set to: ${FETCH9_ROUTE}"
+
           if [ -n "$FETCH9_CF_ENV_JSON" ]; then
             echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./fetch9/manifest.yml \
               -p "./fetch9/${ARTIFACT}" \
-              --no-route --route "${FETCH9_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -886,8 +895,7 @@ jobs:
             echo "Deploying ${DEPLOY_NAME}..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./fetch9/manifest.yml \
-              -p "./fetch9/${ARTIFACT}" \
-              --no-route --route "${FETCH9_ROUTE}"
+              -p "./fetch9/${ARTIFACT}"
           fi
 
           echo "fetch9 deployed to prod: ${DEPLOY_NAME}"
@@ -951,11 +959,14 @@ jobs:
           DEPLOY_NAME="${GH9_NAME}-prod-${VERSION}"
           echo "Deploying ${DEPLOY_NAME} from extracted directory..."
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${GH9_ROUTE}|" ./gh9/extracted/manifest.yml
+          echo "Route set to: ${GH9_ROUTE}"
+
           if [ -n "$GH9_CF_ENV_JSON" ]; then
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./gh9/extracted/manifest.yml \
               -p "./gh9/extracted" \
-              --no-route --route "${GH9_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -968,8 +979,7 @@ jobs:
           else
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./gh9/extracted/manifest.yml \
-              -p "./gh9/extracted" \
-              --no-route --route "${GH9_ROUTE}"
+              -p "./gh9/extracted"
           fi
 
           echo "gh9 deployed to prod: ${DEPLOY_NAME}"
@@ -1028,12 +1038,15 @@ jobs:
           ARTIFACT=$(ls ./web9/ | grep -v manifest.yml | head -1)
           echo "Artifact found: ${ARTIFACT}"
 
+          # Override manifest route with environment-specific route
+          sed -i "s|route:.*|route: ${WEB9_ROUTE}|" ./web9/manifest.yml
+          echo "Route set to: ${WEB9_ROUTE}"
+
           if [ -n "$WEB9_CF_ENV_JSON" ]; then
             echo "Pushing ${DEPLOY_NAME} (--no-start, env vars to inject)..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./web9/manifest.yml \
               -p "./web9/${ARTIFACT}" \
-              --no-route --route "${WEB9_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -1047,8 +1060,7 @@ jobs:
             echo "Deploying ${DEPLOY_NAME}..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./web9/manifest.yml \
-              -p "./web9/${ARTIFACT}" \
-              --no-route --route "${WEB9_ROUTE}"
+              -p "./web9/${ARTIFACT}"
           fi
 
           echo "web9 deployed to prod: ${DEPLOY_NAME}"

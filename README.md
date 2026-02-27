@@ -149,7 +149,7 @@ Supported archive formats: `.tar.gz`, `.tgz`, `.zip`.
 
 ## Routes
 
-Each app has separate routes for nonprod and prod, configured during setup. The workflow overrides the manifest's routes at deploy time using `cf push --no-route --route <route>`, so manifests don't need environment-specific route entries.
+Each app has separate routes for nonprod and prod, configured during setup. The workflow rewrites the manifest's `route:` entry at deploy time using `sed`, so manifests don't need environment-specific route entries.
 
 ## Release Tag Resolution
 
