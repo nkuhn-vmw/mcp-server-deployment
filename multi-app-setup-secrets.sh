@@ -662,14 +662,10 @@ BLOCK
 
           mkdir -p ./%LOWER%
           if [ "$SOURCE" = "tag" ]; then
-            echo "Downloading %NAME% source archive for tag ${TAG}..."
-            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./%LOWER%/source.tar.gz"
-            echo "Extracting source archive..."
-            mkdir -p ./%LOWER%/source-tmp
-            tar -xzf "./%LOWER%/source.tar.gz" -C ./%LOWER%/source-tmp --strip-components=1
-            rm "./%LOWER%/source.tar.gz"
-            mv ./%LOWER%/source-tmp/* ./%LOWER%/ 2>/dev/null || true
-            rm -rf ./%LOWER%/source-tmp
+            echo "Error: %NAME% ${TAG} exists only as a git tag (no release)."
+            echo "File-type apps require a release with compiled artifacts attached."
+            echo "Please create a release at the upstream repo with the artifact matching: ${ARTIFACT_PATTERN}"
+            exit 1
           else
             PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
             echo "Downloading %NAME% release artifact matching: ${PATTERN}"

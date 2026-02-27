@@ -389,14 +389,10 @@ jobs:
 
           mkdir -p ./fetch9
           if [ "$SOURCE" = "tag" ]; then
-            echo "Downloading fetch9 source archive for tag ${TAG}..."
-            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./fetch9/source.tar.gz"
-            echo "Extracting source archive..."
-            mkdir -p ./fetch9/source-tmp
-            tar -xzf "./fetch9/source.tar.gz" -C ./fetch9/source-tmp --strip-components=1
-            rm "./fetch9/source.tar.gz"
-            mv ./fetch9/source-tmp/* ./fetch9/ 2>/dev/null || true
-            rm -rf ./fetch9/source-tmp
+            echo "Error: fetch9 ${TAG} exists only as a git tag (no release)."
+            echo "File-type apps require a release with compiled artifacts attached."
+            echo "Please create a release at the upstream repo with the artifact matching: ${ARTIFACT_PATTERN}"
+            exit 1
           else
             PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
             echo "Downloading fetch9 release artifact matching: ${PATTERN}"
@@ -554,14 +550,10 @@ jobs:
 
           mkdir -p ./web9
           if [ "$SOURCE" = "tag" ]; then
-            echo "Downloading web9 source archive for tag ${TAG}..."
-            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./web9/source.tar.gz"
-            echo "Extracting source archive..."
-            mkdir -p ./web9/source-tmp
-            tar -xzf "./web9/source.tar.gz" -C ./web9/source-tmp --strip-components=1
-            rm "./web9/source.tar.gz"
-            mv ./web9/source-tmp/* ./web9/ 2>/dev/null || true
-            rm -rf ./web9/source-tmp
+            echo "Error: web9 ${TAG} exists only as a git tag (no release)."
+            echo "File-type apps require a release with compiled artifacts attached."
+            echo "Please create a release at the upstream repo with the artifact matching: ${ARTIFACT_PATTERN}"
+            exit 1
           else
             PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
             echo "Downloading web9 release artifact matching: ${PATTERN}"
@@ -835,14 +827,10 @@ jobs:
 
           mkdir -p ./fetch9
           if [ "$SOURCE" = "tag" ]; then
-            echo "Downloading fetch9 source archive for tag ${TAG}..."
-            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./fetch9/source.tar.gz"
-            echo "Extracting source archive..."
-            mkdir -p ./fetch9/source-tmp
-            tar -xzf "./fetch9/source.tar.gz" -C ./fetch9/source-tmp --strip-components=1
-            rm "./fetch9/source.tar.gz"
-            mv ./fetch9/source-tmp/* ./fetch9/ 2>/dev/null || true
-            rm -rf ./fetch9/source-tmp
+            echo "Error: fetch9 ${TAG} exists only as a git tag (no release)."
+            echo "File-type apps require a release with compiled artifacts attached."
+            echo "Please create a release at the upstream repo with the artifact matching: ${ARTIFACT_PATTERN}"
+            exit 1
           else
             PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
             echo "Downloading fetch9 release artifact matching: ${PATTERN}"
@@ -1000,14 +988,10 @@ jobs:
 
           mkdir -p ./web9
           if [ "$SOURCE" = "tag" ]; then
-            echo "Downloading web9 source archive for tag ${TAG}..."
-            gh api "repos/${UPSTREAM_REPO}/tarball/${TAG}" > "./web9/source.tar.gz"
-            echo "Extracting source archive..."
-            mkdir -p ./web9/source-tmp
-            tar -xzf "./web9/source.tar.gz" -C ./web9/source-tmp --strip-components=1
-            rm "./web9/source.tar.gz"
-            mv ./web9/source-tmp/* ./web9/ 2>/dev/null || true
-            rm -rf ./web9/source-tmp
+            echo "Error: web9 ${TAG} exists only as a git tag (no release)."
+            echo "File-type apps require a release with compiled artifacts attached."
+            echo "Please create a release at the upstream repo with the artifact matching: ${ARTIFACT_PATTERN}"
+            exit 1
           else
             PATTERN=$(echo "${ARTIFACT_PATTERN}" | sed "s/{version}/${VERSION_DOTTED}/g")
             echo "Downloading web9 release artifact matching: ${PATTERN}"
