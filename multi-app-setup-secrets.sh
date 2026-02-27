@@ -179,6 +179,8 @@ APP_ARTIFACT_PATTERNS=()
 APP_CF_ENV_JSONS=()
 APP_DEPLOY_TYPES=()
 APP_MANIFEST_MODES=()
+APP_NONPROD_ROUTES=()
+APP_PROD_ROUTES=()
 
 RUNNER=""
 WORKFLOW_NAME=""
@@ -406,12 +408,34 @@ BLOCK
           if [ "$DEPLOY_%UPPER%" = "true" ]; then
             %UPPER%_TAG="${{ inputs.%LOWER%_release_tag }}"
             echo "Validating %NAME% release ${%UPPER%_TAG} in ${%UPPER%_UPSTREAM_REPO}..."
+
+            # Try exact tag first
             RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases/tags/${%UPPER%_TAG}" --jq '.tag_name' 2>&1) || {
-              echo "Error: Release ${%UPPER%_TAG} not found in ${%UPPER%_UPSTREAM_REPO}"
-              echo "API response: ${RELEASE_INFO}"
-              exit 1
+              RELEASE_INFO=""
+              # Try with 'v' prefix if tag doesn't start with 'v'
+              if [[ "${%UPPER%_TAG}" != v* ]]; then
+                ALT_TAG="v${%UPPER%_TAG}"
+                echo "Tag not found, trying ${ALT_TAG}..."
+                RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
+              else
+                # Try without 'v' prefix
+                ALT_TAG="${%UPPER%_TAG#v}"
+                echo "Tag not found, trying ${ALT_TAG}..."
+                RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases/tags/${ALT_TAG}" --jq '.tag_name' 2>&1) || RELEASE_INFO=""
+              fi
+              # Fall back to searching releases by name
+              if [ -z "$RELEASE_INFO" ]; then
+                echo "Tag variants not found, searching by release name..."
+                RELEASE_INFO=$(gh api "repos/${%UPPER%_UPSTREAM_REPO}/releases" --jq ".[] | select(.name == \"${%UPPER%_TAG}\") | .tag_name" 2>&1 | head -1) || RELEASE_INFO=""
+              fi
+              if [ -z "$RELEASE_INFO" ]; then
+                echo "Error: Release ${%UPPER%_TAG} not found in ${%UPPER%_UPSTREAM_REPO}"
+                echo "Tried: tag '${%UPPER%_TAG}', alternate tag format, and release name match"
+                exit 1
+              fi
+              %UPPER%_TAG="$RELEASE_INFO"
             }
-            echo "%NAME% release validated: ${RELEASE_INFO}"
+            echo "%NAME% release validated: ${%UPPER%_TAG}"
 
             %UPPER%_VERSION=${%UPPER%_TAG#v}
             %UPPER%_APP_VERSION=${%UPPER%_VERSION//./-}
@@ -563,6 +587,7 @@ BLOCK
           %UPPER%_NAME: ${{ secrets.%UPPER%_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.%LOWER%_version }}
           %UPPER%_CF_ENV_JSON: ${{ secrets.%UPPER%_CF_ENV_JSON }}
+          %UPPER%_ROUTE: ${{ secrets.%UPPER%_%ENV_UPPER%_ROUTE }}
         run: |
           DEPLOY_NAME="${%UPPER%_NAME}-%ENV%-${VERSION}"
           echo "Deploying ${DEPLOY_NAME} from extracted directory..."
@@ -571,6 +596,7 @@ BLOCK
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/extracted/manifest.yml \
               -p "./%LOWER%/extracted" \
+              --no-route --route "${%UPPER%_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -583,7 +609,8 @@ BLOCK
           else
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/extracted/manifest.yml \
-              -p "./%LOWER%/extracted"
+              -p "./%LOWER%/extracted" \
+              --no-route --route "${%UPPER%_ROUTE}"
           fi
 
           echo "%NAME% deployed to %ENV%: ${DEPLOY_NAME}"
@@ -630,6 +657,7 @@ BLOCK
           %UPPER%_NAME: ${{ secrets.%UPPER%_NAME }}
           VERSION: ${{ needs.validate-and-prepare.outputs.%LOWER%_version }}
           %UPPER%_CF_ENV_JSON: ${{ secrets.%UPPER%_CF_ENV_JSON }}
+          %UPPER%_ROUTE: ${{ secrets.%UPPER%_%ENV_UPPER%_ROUTE }}
         run: |
           DEPLOY_NAME="${%UPPER%_NAME}-%ENV%-${VERSION}"
           ARTIFACT=$(ls ./%LOWER%/ | grep -v manifest.yml | head -1)
@@ -640,6 +668,7 @@ BLOCK
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/manifest.yml \
               -p "./%LOWER%/${ARTIFACT}" \
+              --no-route --route "${%UPPER%_ROUTE}" \
               --no-start
 
             echo "Setting env vars..."
@@ -653,7 +682,8 @@ BLOCK
             echo "Deploying ${DEPLOY_NAME}..."
             ./cf8 push "${DEPLOY_NAME}" \
               -f ./%LOWER%/manifest.yml \
-              -p "./%LOWER%/${ARTIFACT}"
+              -p "./%LOWER%/${ARTIFACT}" \
+              --no-route --route "${%UPPER%_ROUTE}"
           fi
 
           echo "%NAME% deployed to %ENV%: ${DEPLOY_NAME}"
@@ -942,6 +972,8 @@ save_debug_file() {
             echo "${APP_UPPERS[$i]}_DEPLOY_TYPE=${APP_DEPLOY_TYPES[$i]}"
             echo "${APP_UPPERS[$i]}_MANIFEST_MODE=${APP_MANIFEST_MODES[$i]}"
             echo "${APP_UPPERS[$i]}_CF_ENV_JSON=${APP_CF_ENV_JSONS[$i]:-(not set)}"
+            echo "${APP_UPPERS[$i]}_NONPROD_ROUTE=${APP_NONPROD_ROUTES[$i]}"
+            echo "${APP_UPPERS[$i]}_PROD_ROUTE=${APP_PROD_ROUTES[$i]}"
             echo ""
         done
         if [ "$CONFIGURE_SHARED" = "true" ]; then
@@ -1149,6 +1181,12 @@ main() {
         echo ""
         prompt_hidden "CF_ENV_JSON (optional)"
         APP_CF_ENV_JSONS[$i]="$REPLY"
+        echo ""
+        echo -e "  ${BOLD}App routes:${NC}"
+        prompt_value "Nonprod route" "${APP_NAMES[$i]}.apps.internal"
+        APP_NONPROD_ROUTES[$i]="$REPLY"
+        prompt_value "Prod route" "${APP_NAMES[$i]}.apps.internal"
+        APP_PROD_ROUTES[$i]="$REPLY"
     done
 
     # Compute prefixes and names
@@ -1228,6 +1266,8 @@ main() {
             show_value "Manifest mode" "generate (${APP_DEPLOY_TYPES[$i]} template)"
         fi
         show_value "${APP_UPPERS[$i]}_CF_ENV_JSON" "${APP_CF_ENV_JSONS[$i]}"
+        show_value "${APP_UPPERS[$i]}_NONPROD_ROUTE" "${APP_NONPROD_ROUTES[$i]}"
+        show_value "${APP_UPPERS[$i]}_PROD_ROUTE" "${APP_PROD_ROUTES[$i]}"
         echo ""
     done
 
@@ -1282,6 +1322,8 @@ main() {
         set_secret "${APP_UPPERS[$i]}_MANIFEST_PATH" "${APP_MANIFEST_PATHS[$i]}" && ((success_count++)) || true
         set_secret "${APP_UPPERS[$i]}_ARTIFACT_PATTERN" "${APP_ARTIFACT_PATTERNS[$i]}" && ((success_count++)) || true
         set_secret "${APP_UPPERS[$i]}_CF_ENV_JSON" "${APP_CF_ENV_JSONS[$i]}" && ((success_count++)) || true
+        set_secret "${APP_UPPERS[$i]}_NONPROD_ROUTE" "${APP_NONPROD_ROUTES[$i]}" && ((success_count++)) || true
+        set_secret "${APP_UPPERS[$i]}_PROD_ROUTE" "${APP_PROD_ROUTES[$i]}" && ((success_count++)) || true
     done
 
     # Shared CF + approval secrets

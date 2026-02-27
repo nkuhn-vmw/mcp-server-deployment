@@ -37,6 +37,8 @@ The interactive script will prompt for:
    - **Artifact pattern** — release asset glob (e.g., `fetch-mcp-*.jar`, `*_Linux_x86_64.tar.gz`)
    - **Deploy type** — `file` (push artifact directly) or `archive` (extract tar.gz/zip first, push directory)
    - **CF env vars** *(optional)* — JSON object of environment variables to inject before app start
+   - **Nonprod route** — CF route for nonprod (e.g., `app.apps-nonprod.internal`)
+   - **Prod route** — CF route for prod (e.g., `app.apps-prod.internal`)
 8. **CF credentials** — nonprod and prod API endpoints, usernames, passwords, orgs, spaces
 9. **Approval reviewers** — comma-separated GitHub usernames for deployment notifications
 
@@ -78,7 +80,7 @@ Go to **Actions**, select your generated workflow, click **Run workflow**, fill 
 
 Each generated workflow has 4 jobs:
 
-1. **Validate & Prepare** — Authenticates to GitHub (or GHE), validates that the specified release tags exist in the upstream repos
+1. **Validate & Prepare** — Authenticates to GitHub (or GHE), validates that the specified release tags exist in the upstream repos. Tries exact tag, then with/without `v` prefix, then release name as fallback
 2. **Deploy to Nonprod** — Downloads release artifacts, pushes apps to the nonprod CF foundation, records deployed versions in git
 3. **Notify Approval Required** — Creates a deployment notification via the GitHub API for broader visibility
 4. **Deploy to Prod** — Gated by the `production` environment's required reviewers. Once approved, downloads release artifacts, pushes apps to prod, and records deployed versions
@@ -145,6 +147,20 @@ applications:
 
 Supported archive formats: `.tar.gz`, `.tgz`, `.zip`.
 
+## Routes
+
+Each app has separate routes for nonprod and prod, configured during setup. The workflow overrides the manifest's routes at deploy time using `cf push --no-route --route <route>`, so manifests don't need environment-specific route entries.
+
+## Release Tag Resolution
+
+When you enter a release tag (e.g., `v2.7.0` or `2.7.0`), the workflow tries to find the release in this order:
+
+1. Exact tag match (e.g., `v2.7.0`)
+2. Alternate format — adds or removes the `v` prefix (e.g., tries `2.7.0` if `v2.7.0` fails)
+3. Release name match — searches all releases for a matching name
+
+This means you can enter either `v2.7.0` or `2.7.0` regardless of how the upstream repo tags its releases.
+
 ## Secrets Reference
 
 All secrets are configured automatically by the setup script. Secret names use app-specific prefixes derived from the app name (e.g., app name `fetch-t1` → prefix `FETCH_T1_*`).
@@ -178,6 +194,8 @@ All secrets are configured automatically by the setup script. Secret names use a
 | `{PREFIX}_MANIFEST_PATH` | Path to CF manifest in this repo |
 | `{PREFIX}_ARTIFACT_PATTERN` | Release asset glob (e.g., `fetch-mcp-*.jar`) |
 | `{PREFIX}_CF_ENV_JSON` | *(Optional)* JSON object of env vars to inject before app start |
+| `{PREFIX}_NONPROD_ROUTE` | CF route for nonprod deployments (e.g., `app.apps-nonprod.internal`) |
+| `{PREFIX}_PROD_ROUTE` | CF route for prod deployments (e.g., `app.apps-prod.internal`) |
 
 ## Files
 
