@@ -80,7 +80,7 @@ Go to **Actions**, select your generated workflow, click **Run workflow**, fill 
 
 Each generated workflow has 4 jobs:
 
-1. **Validate & Prepare** — Authenticates to GitHub (or GHE), validates that the specified release tags exist in the upstream repos. Tries exact tag, then with/without `v` prefix, then release name as fallback
+1. **Validate & Prepare** — Authenticates to GitHub (or GHE), validates that the specified release tags exist in the upstream repos. Tries exact tag, then with/without `v` prefix, then release name, then plain git tag as fallback. Outputs a `source` flag per app (`release` or `tag`) so downstream jobs know how to download
 2. **Deploy to Nonprod** — Downloads release artifacts, pushes apps to the nonprod CF foundation, records deployed versions in git
 3. **Notify Approval Required** — Creates a deployment notification via the GitHub API for broader visibility
 4. **Deploy to Prod** — Gated by the `production` environment's required reviewers. Once approved, downloads release artifacts, pushes apps to prod, and records deployed versions
@@ -160,9 +160,13 @@ When you enter a release tag (e.g., `v2.7.0` or `2.7.0`), the workflow tries to 
 3. **Release by name** — searches all releases for a matching name
 4. **Git tag** — checks if the tag exists as a plain git tag (no release required)
 
-If found as a release, the workflow downloads release assets using the artifact pattern. If found as a tag only, the workflow downloads the source archive from that tag instead.
+How the download works depends on the source and deploy type:
 
-This means you can enter either `v2.7.0` or `2.7.0`, and it works whether the upstream repo uses GitHub Releases or plain git tags.
+- **Release source** — downloads release assets matching the artifact pattern (both `file` and `archive` apps)
+- **Tag source + `archive` app** — downloads the source tarball from the git tag and extracts it (works for pre-compiled binaries or buildpack-compiled apps)
+- **Tag source + `file` app** — **fails with a clear error**. File-type apps (JARs, WARs) require compiled artifacts that only exist in a GitHub Release. A source tarball contains source code, not compiled binaries
+
+This means you can enter either `v2.7.0` or `2.7.0`, and it works whether the upstream repo uses GitHub Releases or plain git tags. However, `file`-type apps always require a proper GitHub Release with the compiled artifact attached.
 
 ## Secrets Reference
 
