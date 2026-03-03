@@ -1,1 +1,3 @@
 .multi-app-secrets-debug*.txt
+.multi-target-debug*.txt
+*.env
