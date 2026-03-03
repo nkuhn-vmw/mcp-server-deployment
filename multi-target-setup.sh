@@ -330,7 +330,6 @@ emit_reusable_header() {
         type: string
 BLOCK
     done
-    echo "    secrets: inherit"
 }
 
 emit_reusable_permissions() {

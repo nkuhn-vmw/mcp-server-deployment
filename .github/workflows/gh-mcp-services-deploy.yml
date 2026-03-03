@@ -61,7 +61,6 @@ on:
       deploy_web_mcp_services:
         required: true
         type: string
-    secrets: inherit
 
 permissions:
   contents: write
