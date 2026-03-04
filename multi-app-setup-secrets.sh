@@ -6,8 +6,16 @@
 # Works with both GitHub Enterprise Server and github.com
 # Requires: gh CLI authenticated with repo access
 #
+# Usage:
+#   ./multi-app-setup-secrets.sh                     # Interactive mode
+#   ./multi-app-setup-secrets.sh --config vars.env   # Load from config file
+#   ./multi-app-setup-secrets.sh --generate-template # Print a template config file
+#
 
 set -e
+
+CONFIG_FILE=""
+NON_INTERACTIVE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -748,16 +756,20 @@ BLOCK
     done
     echo ""
     echo "          CHANGED=false"
+    echo "          TRACK_FILE=\".last-deployed-${WORKFLOW_SLUG}\""
     if [ "$env_name" = "prod" ]; then
         echo ""
         echo "          git pull --rebase"
     fi
+    echo "          touch \"\$TRACK_FILE\""
     echo ""
     for i in $(seq 0 $((NUM_APPS - 1))); do
         cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}" "$env_name"
           if [ "$DEPLOY_%UPPER%" = "true" ]; then
-            echo "${{ needs.validate-and-prepare.outputs.%LOWER%_release_tag }}" > ".last-deployed-${%UPPER%_NAME}-%ENV%"
-            git add ".last-deployed-${%UPPER%_NAME}-%ENV%"
+            grep -v "^%ENV% ${%UPPER%_NAME} " "$TRACK_FILE" > "${TRACK_FILE}.tmp" || true
+            echo "%ENV% ${%UPPER%_NAME} ${{ needs.validate-and-prepare.outputs.%LOWER%_release_tag }} $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "${TRACK_FILE}.tmp"
+            sort -o "$TRACK_FILE" "${TRACK_FILE}.tmp"
+            rm -f "${TRACK_FILE}.tmp"
             CHANGED=true
           fi
 BLOCK
@@ -765,6 +777,7 @@ BLOCK
     done
     cat <<'EOF'
           if [ "$CHANGED" = "true" ]; then
+            git add "$TRACK_FILE"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
 EOF
@@ -1099,14 +1112,280 @@ show_requirements() {
     read -p "Press Enter when ready to continue (or Ctrl+C to cancel)..."
 }
 
+# ─── Config Template Generation ──────────────────────────────────
+
+generate_template() {
+    cat <<'TEMPLATE'
+# Multi-App Deployment Configuration
+# ───────────────────────────────────
+# Use with: ./multi-app-setup-secrets.sh --config <this-file>
+#
+# Lines starting with # are comments. Empty lines are ignored.
+# All values are key=value pairs. Quote values with spaces.
+
+# ── Platform ────────────────────────────────────────
+# "github.com" or "ghe"
+PLATFORM=github.com
+# GHE_HOST=github.mycompany.com    # Only needed for GHE
+
+# ── Shared Secrets ──────────────────────────────────
+# Set to true to configure shared secrets (GitHub auth, CF credentials,
+# approval reviewers). Set to false if these are already configured.
+CONFIGURE_SHARED=true
+
+# ── GitHub Authentication ───────────────────────────
+GHE_TOKEN=ghp_your_token_here
+
+# ── Workflow Settings ───────────────────────────────
+WORKFLOW_NAME=mcp-services
+RUNNER=ubuntu-latest
+
+# ── Applications ────────────────────────────────────
+# Define 1-10 apps. Each app needs APP_N_* keys where N is 1,2,3...
+NUM_APPS=3
+
+APP_1_NAME=fetch-mcp
+APP_1_UPSTREAM_REPO=org/spring-fetch-mcp
+APP_1_ARTIFACT_PATTERN=fetch-mcp-*.jar
+APP_1_DEPLOY_TYPE=file
+APP_1_MANIFEST_MODE=byom
+APP_1_MANIFEST_PATH=manifests/fetch-mcp/manifest.yml
+# APP_1_CF_ENV_JSON={"KEY":"value"}
+APP_1_NONPROD_ROUTE=fetch-mcp-dev.apps.internal
+APP_1_PROD_ROUTE=fetch-mcp.apps.internal
+
+APP_2_NAME=gh-mcp
+APP_2_UPSTREAM_REPO=github/github-mcp-server
+APP_2_ARTIFACT_PATTERN=github-mcp-server_Linux_x86_64.tar.gz
+APP_2_DEPLOY_TYPE=archive
+APP_2_MANIFEST_MODE=byom
+APP_2_MANIFEST_PATH=manifests/github-mcp/manifest.yml
+APP_2_CF_ENV_JSON={"GITHUB_PERSONAL_ACCESS_TOKEN":"ghp_xxx"}
+APP_2_NONPROD_ROUTE=gh-mcp-dev.apps.internal
+APP_2_PROD_ROUTE=gh-mcp.apps.internal
+
+APP_3_NAME=web-mcp
+APP_3_UPSTREAM_REPO=org/web-search-mcp
+APP_3_ARTIFACT_PATTERN=web-search-mcp-*.jar
+APP_3_DEPLOY_TYPE=file
+APP_3_MANIFEST_MODE=byom
+APP_3_MANIFEST_PATH=manifests/websearch-mcp/manifest.yml
+APP_3_CF_ENV_JSON={"WEBSEARCH_API_KEY":"xxx"}
+APP_3_NONPROD_ROUTE=web-mcp-dev.apps.internal
+APP_3_PROD_ROUTE=web-mcp.apps.internal
+
+# ── Nonprod CF Foundation ───────────────────────────
+# Only needed if CONFIGURE_SHARED=true
+CF_NONPROD_API=https://api.sys.nonprod.example.com
+CF_NONPROD_USERNAME=cf-deployer
+CF_NONPROD_PASSWORD=your-password
+CF_NONPROD_ORG=my-org
+CF_NONPROD_SPACE=nonprod
+
+# ── Prod CF Foundation ──────────────────────────────
+# Only needed if CONFIGURE_SHARED=true
+CF_PROD_API=https://api.sys.prod.example.com
+CF_PROD_USERNAME=cf-deployer
+CF_PROD_PASSWORD=your-password
+CF_PROD_ORG=my-org
+CF_PROD_SPACE=prod
+
+# ── Approval Reviewers ──────────────────────────────
+# Only needed if CONFIGURE_SHARED=true
+APPROVAL_REVIEWERS=user1,user2
+TEMPLATE
+}
+
+# ─── Config File Loading ────────────────────────────────────────
+
+load_config_file() {
+    local config_file="$1"
+
+    if [ ! -f "$config_file" ]; then
+        print_error "Config file not found: ${config_file}"
+        exit 1
+    fi
+
+    print_success "Loading config from: ${BOLD}${config_file}${NC}"
+
+    # Strip comments and blank lines into a cleaned temp file
+    local tmpfile
+    tmpfile=$(mktemp)
+    grep -v '^\s*#' "$config_file" | grep -v '^\s*$' | grep '=' > "$tmpfile" || true
+
+    # Helper: look up a key from the cleaned config file
+    # Uses cut -d'=' -f2- to handle values containing '='
+    _cfg() {
+        local val
+        val=$(grep "^${1}=" "$tmpfile" | head -1 | cut -d'=' -f2-)
+        # Strip surrounding quotes if present
+        val=$(echo "$val" | sed "s/^['\"]//; s/['\"]$//")
+        echo "$val"
+    }
+
+    # ── Map config values to script variables ──────────
+
+    # Platform
+    if [ "$(_cfg PLATFORM)" = "ghe" ]; then
+        GITHUB_PLATFORM="ghe"
+        GHE_HOST="$(_cfg GHE_HOST)"
+    else
+        GITHUB_PLATFORM="github.com"
+        GHE_HOST=""
+    fi
+
+    # Shared secrets flag
+    CONFIGURE_SHARED="$(_cfg CONFIGURE_SHARED)"
+    CONFIGURE_SHARED="${CONFIGURE_SHARED:-true}"
+
+    if [ "$CONFIGURE_SHARED" = "true" ]; then
+        GHE_TOKEN="$(_cfg GHE_TOKEN)"
+    fi
+
+    # Workflow settings
+    WORKFLOW_NAME="$(_cfg WORKFLOW_NAME)"
+    RUNNER="$(_cfg RUNNER)"
+    RUNNER="${RUNNER:-ubuntu-latest}"
+
+    if [ -z "$WORKFLOW_NAME" ]; then
+        print_error "WORKFLOW_NAME is required in config file"
+        rm -f "$tmpfile"
+        exit 1
+    fi
+
+    # Apps
+    NUM_APPS="$(_cfg NUM_APPS)"
+    NUM_APPS="${NUM_APPS:-0}"
+    if [ "$NUM_APPS" -lt 1 ] || [ "$NUM_APPS" -gt 10 ]; then
+        print_error "NUM_APPS must be between 1 and 10 (got: ${NUM_APPS})"
+        rm -f "$tmpfile"
+        exit 1
+    fi
+
+    for i in $(seq 1 $NUM_APPS); do
+        local idx=$((i - 1))
+        APP_NAMES[$idx]="$(_cfg APP_${i}_NAME)"
+        APP_UPSTREAM_REPOS[$idx]="$(_cfg APP_${i}_UPSTREAM_REPO)"
+        APP_ARTIFACT_PATTERNS[$idx]="$(_cfg APP_${i}_ARTIFACT_PATTERN)"
+        APP_DEPLOY_TYPES[$idx]="$(_cfg APP_${i}_DEPLOY_TYPE)"
+        APP_DEPLOY_TYPES[$idx]="${APP_DEPLOY_TYPES[$idx]:-file}"
+        APP_MANIFEST_MODES[$idx]="$(_cfg APP_${i}_MANIFEST_MODE)"
+        APP_MANIFEST_MODES[$idx]="${APP_MANIFEST_MODES[$idx]:-generate}"
+        local mpath="$(_cfg APP_${i}_MANIFEST_PATH)"
+        APP_MANIFEST_PATHS[$idx]="${mpath:-manifests/${APP_NAMES[$idx]}/manifest.yml}"
+        APP_CF_ENV_JSONS[$idx]="$(_cfg APP_${i}_CF_ENV_JSON)"
+        APP_NONPROD_ROUTES[$idx]="$(_cfg APP_${i}_NONPROD_ROUTE)"
+        APP_NONPROD_ROUTES[$idx]="${APP_NONPROD_ROUTES[$idx]:-${APP_NAMES[$idx]}.apps.internal}"
+        APP_PROD_ROUTES[$idx]="$(_cfg APP_${i}_PROD_ROUTE)"
+        APP_PROD_ROUTES[$idx]="${APP_PROD_ROUTES[$idx]:-${APP_NAMES[$idx]}.apps.internal}"
+
+        if [ -z "${APP_NAMES[$idx]}" ]; then
+            print_error "APP_${i}_NAME is required"
+            rm -f "$tmpfile"
+            exit 1
+        fi
+
+        # GITHUB_ prefix check
+        local prefix_check
+        prefix_check=$(echo "${APP_NAMES[$idx]}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+        if [[ "$prefix_check" == GITHUB_* ]]; then
+            print_error "App name '${APP_NAMES[$idx]}' produces prefix '${prefix_check}_*' which starts with GITHUB_"
+            rm -f "$tmpfile"
+            exit 1
+        fi
+    done
+
+    compute_prefixes
+    compute_names
+
+    # Shared CF + approval secrets
+    if [ "$CONFIGURE_SHARED" = "true" ]; then
+        CF_NONPROD_API="$(_cfg CF_NONPROD_API)"
+        CF_NONPROD_USERNAME="$(_cfg CF_NONPROD_USERNAME)"
+        CF_NONPROD_PASSWORD="$(_cfg CF_NONPROD_PASSWORD)"
+        CF_NONPROD_ORG="$(_cfg CF_NONPROD_ORG)"
+        CF_NONPROD_SPACE="$(_cfg CF_NONPROD_SPACE)"
+        CF_PROD_API="$(_cfg CF_PROD_API)"
+        CF_PROD_USERNAME="$(_cfg CF_PROD_USERNAME)"
+        CF_PROD_PASSWORD="$(_cfg CF_PROD_PASSWORD)"
+        CF_PROD_ORG="$(_cfg CF_PROD_ORG)"
+        CF_PROD_SPACE="$(_cfg CF_PROD_SPACE)"
+        APPROVAL_REVIEWERS="$(_cfg APPROVAL_REVIEWERS)"
+    fi
+
+    rm -f "$tmpfile"
+    print_success "Config loaded: ${NUM_APPS} apps, workflow: ${WORKFLOW_NAME}"
+}
+
 # ─── Main ────────────────────────────────────────────────────────
 
 main() {
+    # Parse command-line arguments
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --config)
+                CONFIG_FILE="$2"
+                NON_INTERACTIVE=true
+                shift 2
+                ;;
+            --generate-template)
+                generate_template
+                exit 0
+                ;;
+            --help|-h)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --config <file>       Load configuration from a file (non-interactive)"
+                echo "  --generate-template   Print a template config file to stdout"
+                echo "  --help, -h            Show this help message"
+                echo ""
+                echo "Examples:"
+                echo "  $0                              # Interactive mode"
+                echo "  $0 --generate-template > my.env # Create a template config"
+                echo "  $0 --config my.env              # Run from config file"
+                exit 0
+                ;;
+            *)
+                print_error "Unknown option: $1"
+                echo "Use --help for usage information."
+                exit 1
+                ;;
+        esac
+    done
+
     clear 2>/dev/null || true
 
     print_header "Multi-App Deployment Setup"
 
     check_gh_cli
+
+    if [ "$NON_INTERACTIVE" = true ]; then
+        # ── Non-interactive mode: load from config file ──
+        load_config_file "$CONFIG_FILE"
+
+        # Show review
+        echo ""
+        print_header "Configuration Summary"
+
+        echo -e "${BOLD}Workflow name:${NC} ${CYAN}${WORKFLOW_NAME}${NC}  →  ${CYAN}${GENERATED_WORKFLOW}${NC}"
+        echo -e "${BOLD}Runner:${NC} ${CYAN}${RUNNER}${NC}"
+        echo -e "${BOLD}Configure shared:${NC} ${CYAN}${CONFIGURE_SHARED}${NC}"
+        echo ""
+
+        echo -e "${BOLD}Apps (${NUM_APPS}):${NC}"
+        for i in $(seq 0 $((NUM_APPS - 1))); do
+            echo -e "  ${CYAN}${APP_NAMES[$i]}${NC} (${APP_DEPLOY_TYPES[$i]}) → nonprod: ${APP_NONPROD_ROUTES[$i]} | prod: ${APP_PROD_ROUTES[$i]}"
+        done
+        echo ""
+
+        # Generate + set secrets without prompting for confirmation
+        print_header "Generating Workflow & Manifests"
+        generate_workflow
+        generate_manifests
+
+    else
+        # ── Interactive mode ──
 
     echo ""
     choose_platform
@@ -1340,6 +1619,8 @@ main() {
     print_header "Generating Workflow & Manifests"
     generate_workflow
     generate_manifests
+
+    fi  # end interactive/non-interactive branch
 
     print_header "Setting GitHub Secrets"
 

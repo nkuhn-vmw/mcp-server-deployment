@@ -612,14 +612,18 @@ BLOCK
     done
     echo ""
     echo "          CHANGED=false"
+    echo "          TRACK_FILE=\".last-deployed-${WORKFLOW_GROUP}\""
     echo ""
     echo "          git pull --rebase || true"
+    echo "          touch \"\$TRACK_FILE\""
     echo ""
     for i in $(seq 0 $((NUM_APPS - 1))); do
         cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}"
           if [ "$DEPLOY_%UPPER%" = "true" ]; then
-            echo "${{ inputs.%LOWER%_release_tag }}" > ".last-deployed-${%UPPER%_NAME}-${{ inputs.target_label }}"
-            git add ".last-deployed-${%UPPER%_NAME}-${{ inputs.target_label }}"
+            grep -v "^${{ inputs.target_label }} ${%UPPER%_NAME} " "$TRACK_FILE" > "${TRACK_FILE}.tmp" || true
+            echo "${{ inputs.target_label }} ${%UPPER%_NAME} ${{ inputs.%LOWER%_release_tag }} $(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "${TRACK_FILE}.tmp"
+            sort -o "$TRACK_FILE" "${TRACK_FILE}.tmp"
+            rm -f "${TRACK_FILE}.tmp"
             CHANGED=true
           fi
 BLOCK
@@ -627,6 +631,7 @@ BLOCK
     done
     cat <<'EOF'
           if [ "$CHANGED" = "true" ]; then
+            git add "$TRACK_FILE"
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
 EOF
@@ -1202,6 +1207,16 @@ NONPROD_APP_3_CF_ENV_JSON={"WEBSEARCH_API_KEY":"xxx"}
 # Define 1-10 prod targets. Each target needs PROD_N_* keys.
 NUM_PROD_TARGETS=2
 
+# ── Shared Production CF Credentials (optional) ────
+# Set SHARED_PROD_CF_CREDS=true to use the same CF API, username, and
+# password for all production targets. Each target still needs its own
+# label, org, space, and per-app config.
+# Per-target PROD_N_CF_API/USERNAME/PASSWORD can still override if needed.
+# SHARED_PROD_CF_CREDS=true
+# SHARED_PROD_CF_API=https://api.sys.prod.example.com
+# SHARED_PROD_CF_USERNAME=cf-deployer
+# SHARED_PROD_CF_PASSWORD=your-password
+
 # -- Prod Target 1 --
 PROD_1_LABEL=prod-alpha
 PROD_1_CF_API=https://api.sys.prod.example.com
@@ -1359,6 +1374,21 @@ load_config_file() {
         exit 1
     fi
 
+    # Check for shared prod CF credentials
+    local SHARED_PROD_CF_CREDS="$(_cfg SHARED_PROD_CF_CREDS)"
+    local SHARED_CF_API="" SHARED_CF_USERNAME="" SHARED_CF_PASSWORD=""
+    if [ "$SHARED_PROD_CF_CREDS" = "true" ]; then
+        SHARED_CF_API="$(_cfg SHARED_PROD_CF_API)"
+        SHARED_CF_USERNAME="$(_cfg SHARED_PROD_CF_USERNAME)"
+        SHARED_CF_PASSWORD="$(_cfg SHARED_PROD_CF_PASSWORD)"
+        if [ -z "$SHARED_CF_API" ] || [ -z "$SHARED_CF_USERNAME" ] || [ -z "$SHARED_CF_PASSWORD" ]; then
+            print_error "SHARED_PROD_CF_CREDS=true but SHARED_PROD_CF_API, SHARED_PROD_CF_USERNAME, or SHARED_PROD_CF_PASSWORD is missing"
+            rm -f "$tmpfile"
+            exit 1
+        fi
+        print_success "Using shared CF credentials for all prod targets"
+    fi
+
     for t in $(seq 1 $NUM_PROD_TARGETS); do
         local raw_label="$(_cfg PROD_${t}_LABEL)"
         raw_label="${raw_label:-prod-${t}}"
@@ -1373,9 +1403,13 @@ load_config_file() {
             fi
         done
 
-        TARGET_CF_APIS[$t]="$(_cfg PROD_${t}_CF_API)"
-        TARGET_CF_USERNAMES[$t]="$(_cfg PROD_${t}_CF_USERNAME)"
-        TARGET_CF_PASSWORDS[$t]="$(_cfg PROD_${t}_CF_PASSWORD)"
+        # Per-target CF creds with shared fallback
+        local per_target_api="$(_cfg PROD_${t}_CF_API)"
+        local per_target_user="$(_cfg PROD_${t}_CF_USERNAME)"
+        local per_target_pass="$(_cfg PROD_${t}_CF_PASSWORD)"
+        TARGET_CF_APIS[$t]="${per_target_api:-$SHARED_CF_API}"
+        TARGET_CF_USERNAMES[$t]="${per_target_user:-$SHARED_CF_USERNAME}"
+        TARGET_CF_PASSWORDS[$t]="${per_target_pass:-$SHARED_CF_PASSWORD}"
         TARGET_CF_ORGS[$t]="$(_cfg PROD_${t}_CF_ORG)"
         TARGET_CF_SPACES[$t]="$(_cfg PROD_${t}_CF_SPACE)"
 
@@ -1606,6 +1640,28 @@ main() {
         exit 1
     fi
 
+    # Ask if all prod targets share the same CF API/credentials
+    local SHARED_PROD_CF_CREDS=false
+    local SHARED_CF_API="" SHARED_CF_USERNAME="" SHARED_CF_PASSWORD=""
+    if [ "$NUM_PROD_TARGETS" -gt 1 ]; then
+        echo ""
+        echo -e "  ${BOLD}Do all prod targets use the same CF API endpoint and credentials?${NC}"
+        echo -e "  ${DIM}If yes, you'll enter CF API/username/password once and they'll be reused.${NC}"
+        echo -e "  ${DIM}You'll still configure org, space, and app settings per target.${NC}"
+        echo ""
+        read -p "  Share CF credentials across all prod targets? [y/N]: " share_reply
+        if [[ "$share_reply" =~ ^[Yy]$ ]]; then
+            SHARED_PROD_CF_CREDS=true
+            print_subheader "Shared Production CF Credentials"
+            prompt_value "CF API endpoint" "https://api.sys.prod.example.com"
+            SHARED_CF_API="$REPLY"
+            prompt_value "CF username" "cf-deployer"
+            SHARED_CF_USERNAME="$REPLY"
+            prompt_hidden "CF password"
+            SHARED_CF_PASSWORD="$REPLY"
+        fi
+    fi
+
     for t in $(seq 1 $NUM_PROD_TARGETS); do
         print_subheader "Production Target $t"
         prompt_value "Target label" "prod-bu-$t"
@@ -1623,13 +1679,20 @@ main() {
         echo -e "  ${DIM}Target: ${TARGET_LABELS[$t]}${NC}"
         echo ""
 
-        print_subheader "${TARGET_LABELS[$t]} CF Credentials"
-        prompt_value "CF API endpoint" "https://api.sys.prod.example.com"
-        TARGET_CF_APIS[$t]="$REPLY"
-        prompt_value "CF username" "cf-deployer"
-        TARGET_CF_USERNAMES[$t]="$REPLY"
-        prompt_hidden "CF password"
-        TARGET_CF_PASSWORDS[$t]="$REPLY"
+        if [ "$SHARED_PROD_CF_CREDS" = true ]; then
+            TARGET_CF_APIS[$t]="$SHARED_CF_API"
+            TARGET_CF_USERNAMES[$t]="$SHARED_CF_USERNAME"
+            TARGET_CF_PASSWORDS[$t]="$SHARED_CF_PASSWORD"
+            print_success "Using shared CF credentials (API: ${SHARED_CF_API})"
+        else
+            print_subheader "${TARGET_LABELS[$t]} CF Credentials"
+            prompt_value "CF API endpoint" "https://api.sys.prod.example.com"
+            TARGET_CF_APIS[$t]="$REPLY"
+            prompt_value "CF username" "cf-deployer"
+            TARGET_CF_USERNAMES[$t]="$REPLY"
+            prompt_hidden "CF password"
+            TARGET_CF_PASSWORDS[$t]="$REPLY"
+        fi
         prompt_value "CF org" "my-org"
         TARGET_CF_ORGS[$t]="$REPLY"
         prompt_value "CF space" "prod"

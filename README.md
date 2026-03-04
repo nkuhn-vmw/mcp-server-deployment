@@ -98,7 +98,16 @@ Apps can be deployed independently — set `deploy_{app}` to `false` to skip an 
 
 ### Version Tracking
 
-After each deployment, the workflow commits a `.last-deployed-{app}-{env}` file recording the deployed release tag. This provides an audit trail directly in the repo.
+After each deployment, the workflow updates a single `.last-deployed-{workflow-group}` file with one line per app/target combination. Each line records the target label, app name, version, and timestamp:
+
+```
+nonprod  fetch-dev   v1.2.0  2024-03-04T15:30:00Z
+nonprod  gh-mcp-dev  v0.31.0 2024-03-04T15:30:00Z
+prod-alpha  fetch-alpha  v1.2.0  2024-03-04T15:35:00Z
+prod-alpha  gh-mcp-alpha v0.31.0 2024-03-04T15:35:00Z
+```
+
+Lines are updated in-place (not appended) on each deploy, keeping the file sorted.
 
 ## Environment Variables Injection
 
