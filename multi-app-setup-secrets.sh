@@ -196,6 +196,7 @@ WORKFLOW_SLUG=""
 DISPLAY_NAME=""
 GENERATED_WORKFLOW=""
 DEBUG_FILE=""
+POST_DEPLOY_SCRIPT=""
 
 compute_prefixes() {
     for i in $(seq 0 $((NUM_APPS - 1))); do
@@ -737,6 +738,46 @@ BLOCK
         fi
     done
 
+    # Post-deploy script
+    echo ""
+    echo "      - name: Run post-deploy script"
+    echo "        env:"
+    echo "          POST_DEPLOY_SCRIPT: \${{ secrets.POST_DEPLOY_SCRIPT }}"
+    echo "          TARGET_LABEL: ${env_name}"
+    for i in $(seq 0 $((NUM_APPS - 1))); do
+        cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}"
+          DEPLOY_%UPPER%: ${{ needs.validate-and-prepare.outputs.deploy_%LOWER% }}
+          %UPPER%_NAME: ${{ secrets.%UPPER%_NAME }}
+          %UPPER%_VERSION: ${{ needs.validate-and-prepare.outputs.%LOWER%_version }}
+BLOCK
+    done
+    echo "        run: |"
+    echo "          if [ -z \"\$POST_DEPLOY_SCRIPT\" ] || [ ! -f \"\$POST_DEPLOY_SCRIPT\" ]; then"
+    echo "            echo \"No post-deploy script configured, skipping\""
+    echo "            exit 0"
+    echo "          fi"
+    echo ""
+    echo "          # Build list of deployed app names for the script"
+    echo "          DEPLOYED_APPS=\"\""
+    for i in $(seq 0 $((NUM_APPS - 1))); do
+        cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}"
+          if [ "$DEPLOY_%UPPER%" = "true" ]; then
+            DEPLOYED_APPS="${DEPLOYED_APPS} ${%UPPER%_NAME}-${TARGET_LABEL}-${%UPPER%_VERSION}"
+          fi
+BLOCK
+    done
+    echo ""
+    cat <<'EOF'
+          export DEPLOYED_APPS="${DEPLOYED_APPS# }"
+          export TARGET_LABEL
+
+          chmod +x "$POST_DEPLOY_SCRIPT"
+          echo "Running post-deploy script: ${POST_DEPLOY_SCRIPT}"
+          echo "  Target: ${TARGET_LABEL}"
+          echo "  Deployed apps: ${DEPLOYED_APPS}"
+          ./"$POST_DEPLOY_SCRIPT"
+EOF
+
     emit_git_push_auth_step
 
     # Record deployed versions
@@ -1002,6 +1043,7 @@ save_debug_file() {
         echo "# Workflow name: ${WORKFLOW_NAME}"
         echo "# Workflow file: ${GENERATED_WORKFLOW}"
         echo "# Runner: ${RUNNER}"
+        echo "# Post-deploy script: ${POST_DEPLOY_SCRIPT:-(not set)}"
         echo ""
         echo "# Secret name prefixes:"
         for i in $(seq 0 $((NUM_APPS - 1))); do
@@ -1140,6 +1182,13 @@ GHE_TOKEN=ghp_your_token_here
 WORKFLOW_NAME=mcp-services
 RUNNER=ubuntu-latest
 
+# ── Post-Deploy Script (optional) ───────────────────
+# Path to a bash script in this repo to run after each environment's app deployments.
+# The script runs with CF CLI already authenticated to the target foundation.
+# Available env vars: TARGET_LABEL, DEPLOYED_APPS (space-separated app names),
+# and per-app DEPLOY_{APP}=true/false, {APP}_NAME, {APP}_VERSION.
+# POST_DEPLOY_SCRIPT=scripts/post-deploy.sh
+
 # ── Applications ────────────────────────────────────
 # Define 1-10 apps. Each app needs APP_N_* keys where N is 1,2,3...
 NUM_APPS=3
@@ -1246,6 +1295,7 @@ load_config_file() {
     WORKFLOW_NAME="$(_cfg WORKFLOW_NAME)"
     RUNNER="$(_cfg RUNNER)"
     RUNNER="${RUNNER:-ubuntu-latest}"
+    POST_DEPLOY_SCRIPT="$(_cfg POST_DEPLOY_SCRIPT)"
 
     if [ -z "$WORKFLOW_NAME" ]; then
         print_error "WORKFLOW_NAME is required in config file"
@@ -1370,6 +1420,7 @@ main() {
 
         echo -e "${BOLD}Workflow name:${NC} ${CYAN}${WORKFLOW_NAME}${NC}  →  ${CYAN}${GENERATED_WORKFLOW}${NC}"
         echo -e "${BOLD}Runner:${NC} ${CYAN}${RUNNER}${NC}"
+        echo -e "${BOLD}Post-deploy script:${NC} ${CYAN}${POST_DEPLOY_SCRIPT:-(none)}${NC}"
         echo -e "${BOLD}Configure shared:${NC} ${CYAN}${CONFIGURE_SHARED}${NC}"
         echo ""
 
@@ -1541,6 +1592,16 @@ main() {
         APPROVAL_REVIEWERS="$REPLY"
     fi
 
+    # Post-deploy script
+    print_header "Post-Deploy Script (Optional)"
+    echo -e "  ${DIM}Optionally specify a bash script in this repo to run after each environment's deployments.${NC}"
+    echo -e "  ${DIM}The script runs with CF CLI authenticated. Available env vars:${NC}"
+    echo -e "  ${DIM}  TARGET_LABEL, DEPLOYED_APPS (space-separated), per-app {APP}_NAME and {APP}_VERSION${NC}"
+    echo -e "  ${DIM}Leave empty to skip.${NC}"
+    echo ""
+    prompt_value "Post-deploy script path" "scripts/post-deploy.sh"
+    POST_DEPLOY_SCRIPT="$REPLY"
+
     # Confirmation
     print_header "Review Your Configuration"
 
@@ -1607,6 +1668,12 @@ main() {
         show_value "APPROVAL_REVIEWERS" "$APPROVAL_REVIEWERS"
     fi
 
+    if [ -n "$POST_DEPLOY_SCRIPT" ]; then
+        echo ""
+        echo -e "${CYAN}Post-Deploy Script:${NC}"
+        show_value "POST_DEPLOY_SCRIPT" "$POST_DEPLOY_SCRIPT"
+    fi
+
     echo ""
     read -p "Set these secrets and generate workflow? [y/N]: " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
@@ -1658,6 +1725,10 @@ main() {
         set_secret "CF_PROD_ORG" "$CF_PROD_ORG" && ((success_count++)) || true
         set_secret "CF_PROD_SPACE" "$CF_PROD_SPACE" && ((success_count++)) || true
         set_secret "APPROVAL_REVIEWERS" "$APPROVAL_REVIEWERS" && ((success_count++)) || true
+    fi
+
+    if [ -n "$POST_DEPLOY_SCRIPT" ]; then
+        set_secret "POST_DEPLOY_SCRIPT" "$POST_DEPLOY_SCRIPT" && ((success_count++)) || true
     fi
 
     echo ""

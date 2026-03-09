@@ -128,6 +128,37 @@ Download behavior depends on source and deploy type:
 - **Git tag + `archive`** — downloads source tarball and extracts it
 - **Git tag + `file`** — **fails** (file-type apps need compiled artifacts from a Release)
 
+### Post-Deploy Script
+
+Both scripts support an optional bash script that runs after each environment's app deployments. The script executes with CF CLI already authenticated, so you can run commands like `cf add-network-policy`.
+
+Set `POST_DEPLOY_SCRIPT` in your config to the path of a script in the repo:
+
+```
+POST_DEPLOY_SCRIPT=scripts/post-deploy.sh
+```
+
+The script receives these environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `TARGET_LABEL` | Environment name (e.g., `nonprod`, `prod-alpha`) |
+| `DEPLOYED_APPS` | Space-separated list of deployed CF app names |
+| `DEPLOY_{APP}` | `true`/`false` per app |
+| `{APP}_NAME` | CF app name for each app |
+| `{APP}_VERSION` | Deployed version for each app |
+
+Example `scripts/post-deploy.sh`:
+
+```bash
+#!/bin/bash
+# Add network policies from gateway to each deployed MCP server
+for APP in $DEPLOYED_APPS; do
+  echo "Adding network policy: mcp-gateway -> ${APP}"
+  cf add-network-policy mcp-gateway "$APP" --protocol tcp --port 8080
+done
+```
+
 ### Environment Variables Injection
 
 Provide a JSON object for `CF_ENV_JSON` in your config:

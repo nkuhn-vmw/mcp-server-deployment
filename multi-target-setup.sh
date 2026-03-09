@@ -567,18 +567,42 @@ BLOCK
 
     # Post-deploy script
     echo ""
-    cat <<'EOF'
-      - name: Run post-deploy script
-        env:
-          POST_DEPLOY_SCRIPT: ${{ secrets.POST_DEPLOY_SCRIPT }}
-        run: |
-          if [ -n "$POST_DEPLOY_SCRIPT" ] && [ -f "$POST_DEPLOY_SCRIPT" ]; then
-            chmod +x "$POST_DEPLOY_SCRIPT"
-            echo "Running post-deploy script: ${POST_DEPLOY_SCRIPT}"
-            ./"$POST_DEPLOY_SCRIPT" "${{ inputs.target_label }}"
-          else
-            echo "No post-deploy script configured, skipping"
+    echo "      - name: Run post-deploy script"
+    echo "        env:"
+    echo "          POST_DEPLOY_SCRIPT: \${{ secrets.POST_DEPLOY_SCRIPT }}"
+    echo "          TARGET_LABEL: \${{ inputs.target_label }}"
+    for i in $(seq 0 $((NUM_APPS - 1))); do
+        cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}"
+          DEPLOY_%UPPER%: ${{ inputs.deploy_%LOWER% }}
+          %UPPER%_NAME: ${{ secrets.%UPPER%_NAME }}
+          %UPPER%_VERSION: ${{ inputs.%LOWER%_version }}
+BLOCK
+    done
+    echo "        run: |"
+    echo "          if [ -z \"\$POST_DEPLOY_SCRIPT\" ] || [ ! -f \"\$POST_DEPLOY_SCRIPT\" ]; then"
+    echo "            echo \"No post-deploy script configured, skipping\""
+    echo "            exit 0"
+    echo "          fi"
+    echo ""
+    echo "          # Build list of deployed app names for the script"
+    echo "          DEPLOYED_APPS=\"\""
+    for i in $(seq 0 $((NUM_APPS - 1))); do
+        cat <<'BLOCK' | apply_placeholders "${APP_UPPERS[$i]}" "${APP_LOWERS[$i]}" "${APP_NAMES[$i]}"
+          if [ "$DEPLOY_%UPPER%" = "true" ]; then
+            DEPLOYED_APPS="${DEPLOYED_APPS} ${%UPPER%_NAME}-${TARGET_LABEL}-${%UPPER%_VERSION}"
           fi
+BLOCK
+    done
+    echo ""
+    cat <<'EOF'
+          export DEPLOYED_APPS="${DEPLOYED_APPS# }"
+          export TARGET_LABEL
+
+          chmod +x "$POST_DEPLOY_SCRIPT"
+          echo "Running post-deploy script: ${POST_DEPLOY_SCRIPT}"
+          echo "  Target: ${TARGET_LABEL}"
+          echo "  Deployed apps: ${DEPLOYED_APPS}"
+          ./"$POST_DEPLOY_SCRIPT"
 EOF
 
     # Version tracking
@@ -1153,6 +1177,10 @@ WORKFLOW_GROUP=mcp-services
 RUNNER=ubuntu-latest
 
 # ── Post-Deploy Script (optional) ───────────────────
+# Path to a bash script in this repo to run after each target's app deployments.
+# The script runs with CF CLI already authenticated to the target foundation.
+# Available env vars: TARGET_LABEL, DEPLOYED_APPS (space-separated app names),
+# and per-app DEPLOY_{APP}=true/false, {APP}_NAME, {APP}_VERSION.
 # POST_DEPLOY_SCRIPT=scripts/post-deploy.sh
 
 # ── Approval Reviewers ──────────────────────────────
@@ -1717,8 +1745,9 @@ main() {
     # ── Post-deploy script ──────────────────────────────────────
     print_header "Post-Deploy Script (Optional)"
 
-    echo -e "  ${DIM}Optionally specify a script in this repo to run after each deployment.${NC}"
-    echo -e "  ${DIM}The script receives the target label as \$1 (e.g., 'nonprod', 'prod-alpha').${NC}"
+    echo -e "  ${DIM}Optionally specify a bash script in this repo to run after each target's deployments.${NC}"
+    echo -e "  ${DIM}The script runs with CF CLI authenticated. Available env vars:${NC}"
+    echo -e "  ${DIM}  TARGET_LABEL, DEPLOYED_APPS (space-separated), per-app {APP}_NAME and {APP}_VERSION${NC}"
     echo -e "  ${DIM}Leave empty to skip.${NC}"
     echo ""
     prompt_value "Post-deploy script path" "scripts/post-deploy.sh"
