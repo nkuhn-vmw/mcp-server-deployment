@@ -537,6 +537,7 @@ EOF
         run: |
           curl -sL "https://packages.cloudfoundry.org/stable?release=linux64-binary&version=${{ env.CF_CLI_VERSION }}&source=github" | tar -zx
           chmod +x cf8
+          sudo ln -sf "\$PWD/cf8" /usr/local/bin/cf
 EOF
 
     # Authenticate to CF
